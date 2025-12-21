@@ -1,6 +1,6 @@
 # 🎬 MyFlix - Your own n**flix Clone for Home Network Streaming
 
-A complete n**flix-inspired streaming platform built for your home network. Stream your personal movie collection with a beautiful, responsive interface that rivals commercial streaming services.
+A complete n**flix-inspired streaming platform built for your home network. Built with **React.js** and **Node.js**, this full-stack application lets you stream your personal movie collection with a beautiful, responsive interface that rivals commercial streaming services.
 
 ![MyFlix Dashboard](https://via.placeholder.com/800x400/e50914/ffffff?text=MyFlix+Dashboard)
 
@@ -43,6 +43,85 @@ A complete n**flix-inspired streaming platform built for your home network. Stre
 - **Admin-Only Uploads** - Controlled content management
 - **Rate Limiting** - Protection against abuse
 - **Input Validation** - Security against malicious inputs
+
+## 💻 Tech Stack
+
+MyFlix is built using modern web technologies with a React.js frontend and Node.js backend architecture.
+
+### Frontend (React.js)
+
+**Core Framework:**
+- **React 18.2.0** - Modern React with hooks and concurrent features
+- **React DOM** - React rendering engine
+- **Create React App** - Development tooling and build configuration
+
+**Routing & Navigation:**
+- **React Router DOM v6.15.0** - Client-side routing and navigation
+
+**State Management & Data Fetching:**
+- **React Query v3.39.3** - Powerful data synchronization for React (server state management, caching, background updates)
+
+**UI & Styling:**
+- **Styled Components v6.0.8** - CSS-in-JS styling solution
+- **Framer Motion v10.16.4** - Production-ready motion library for React animations
+- **React Icons v4.11.0** - Popular icons for React
+
+**Forms & Validation:**
+- **React Hook Form v7.46.0** - Performant, flexible forms with easy validation
+
+**Video & Media:**
+- **React Player v2.13.0** - React component for playing media from various sources
+
+**Notifications:**
+- **React Hot Toast v2.4.1** - Beautiful toast notifications for React
+
+**Performance & UX:**
+- **React Intersection Observer v9.5.2** - Hooks for detecting element visibility
+- **React LazyLoad v3.2.0** - Lazy loading component for React
+- **Swiper v10.3.0** - Modern touch slider with React support
+
+**Utilities:**
+- **Axios v1.5.0** - Promise-based HTTP client for API requests
+- **Lodash Debounce v4.0.8** - Debounce function for performance optimization
+- **Date-fns v2.30.0** - Modern JavaScript date utility library
+
+### Backend (Node.js)
+
+**Core Framework:**
+- **Node.js** - JavaScript runtime environment
+- **Express.js v4.18.2** - Fast, unopinionated web framework
+
+**Database:**
+- **SQLite3 v5.1.6** - Lightweight, serverless database engine
+
+**Authentication & Security:**
+- **JWT (JSON Web Tokens) v9.0.2** - Secure token-based authentication
+- **BcryptJS v2.4.3** - Password hashing library
+- **Helmet v7.0.0** - Security middleware for Express
+- **Express Rate Limit v6.10.0** - Basic rate-limiting middleware
+
+**File Handling:**
+- **Multer v1.4.5** - Middleware for handling multipart/form-data (file uploads)
+- **FFmpeg** - Video processing and thumbnail generation
+- **Fluent FFmpeg v2.1.2** - Node.js wrapper for FFmpeg
+
+**Utilities:**
+- **CORS v2.8.5** - Cross-Origin Resource Sharing middleware
+- **Compression v1.7.4** - Compression middleware for Express
+- **Axios v1.10.0** - HTTP client for API calls
+
+### Development Tools
+
+- **Nodemon v3.0.1** - Development utility that monitors for file changes
+- **Concurrently v8.2.1** - Run multiple commands concurrently
+
+### Architecture
+
+- **Full-Stack JavaScript** - Single language (JavaScript) for both frontend and backend
+- **RESTful API** - Backend exposes REST API endpoints
+- **JWT-based Authentication** - Stateless authentication system
+- **SQLite Database** - File-based database, perfect for home server setup
+- **React SPA** - Single Page Application with client-side routing
 
 ## 🚀 Quick Start
 
@@ -327,9 +406,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🙏 Acknowledgments
 
 - Inspired by n**flix's user interface and experience
-- Built with React, Node.js, and modern web technologies
-- FFmpeg for video processing capabilities
-- SQLite for lightweight database management
+- Built with **React.js 18.2** frontend and **Node.js/Express.js** backend
+- **FFmpeg** for video processing and thumbnail generation
+- **SQLite** for lightweight, serverless database management
+- **React Router**, **React Query**, and other modern React ecosystem libraries
+- All the open-source contributors and libraries that made this project possible
 
 ---
 
