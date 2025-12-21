@@ -10,3 +10,5 @@ client/node_modules
 movies/*.mkv
 movies/*.mp4
 movies/*.avi
+uploads/thumbnails/*
+thumbnails/*
