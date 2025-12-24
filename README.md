@@ -44,6 +44,13 @@ A complete n**flix-inspired streaming platform built for your home network. Buil
 - **Rate Limiting** - Protection against abuse
 - **Input Validation** - Security against malicious inputs
 
+### 📱 Progressive Web App (PWA) Features
+- **Installable App** - Install MyFlix as a standalone app on your device
+- **Standalone Mode** - Runs in its own window without browser UI
+- **App-Like Experience** - Native app feel with quick access from taskbar/dock
+- **Cross-Device Sync** - Install on multiple devices for seamless access
+- **Offline Capability** - Enhanced offline experience (when configured)
+
 ## 💻 Tech Stack
 
 MyFlix is built using modern web technologies with a React.js frontend and Node.js backend architecture.
@@ -317,6 +324,45 @@ To access MyFlix from other devices on your network:
 - Modern smart TV browsers
 - Casting support (via browser casting)
 - Full-screen video playback
+
+## 📲 Progressive Web App (PWA) Installation
+
+MyFlix is configured as a **Progressive Web App (PWA)**, which means modern browsers (Chrome, Edge, Firefox, Safari) will automatically detect it and offer to install it as a standalone application.
+
+### Why You See the Install Prompt
+
+When you visit MyFlix in your browser (especially Edge, Chrome, or other Chromium-based browsers), you may see an **"Install MyFlix"** prompt. This happens because:
+
+1. **PWA Manifest** - The app includes a `manifest.json` file that declares it as installable
+2. **Standalone Display Mode** - Configured to run as a standalone app (not just a website)
+3. **Browser Detection** - Modern browsers automatically detect PWA-capable sites and offer installation
+
+### Benefits of Installing as PWA
+
+Installing MyFlix as a PWA provides several advantages:
+
+- ✅ **Dedicated Window** - Opens in its own focused window without browser UI
+- ✅ **Quick Access** - Pin to taskbar (Windows) or dock (macOS) for instant access
+- ✅ **App-Like Experience** - Feels like a native application
+- ✅ **Better Performance** - Optimized loading and caching
+- ✅ **Cross-Device** - Install on multiple devices (phone, tablet, desktop)
+
+### How to Install
+
+**On Desktop (Windows/macOS/Linux):**
+- Click the **"Install"** button when the prompt appears
+- Or look for the install icon (➕) in your browser's address bar
+- Or go to browser menu → "Install MyFlix" / "Install app"
+
+**On Mobile (iOS/Android):**
+- **iOS Safari**: Tap Share → "Add to Home Screen"
+- **Android Chrome**: Tap the menu → "Install app" or "Add to Home Screen"
+
+### If You Don't Want to Install
+
+You can simply click **"Not now"** or dismiss the prompt. MyFlix will continue to work normally in your browser. The prompt may reappear on future visits, but you can always dismiss it.
+
+**Note:** The PWA features are optional. You can use MyFlix entirely in your browser without installing it.
 
 ## 🛡️ Security Considerations
 

@@ -24,6 +24,16 @@ const Hero = styled.div`
   justify-content: center;
   padding: 0 4rem;
   position: relative;
+  
+  @media (max-width: 768px) {
+    padding: 0 2rem;
+    height: 50vh;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 0 1rem;
+    height: 40vh;
+  }
 `;
 
 const HeroContent = styled(motion.div)`
@@ -47,6 +57,16 @@ const HeroDescription = styled.p`
   line-height: 1.5;
   margin-bottom: 2rem;
   text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
+  
+  @media (max-width: 768px) {
+    font-size: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  
+  @media (max-width: 480px) {
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+  }
 `;
 
 const ButtonGroup = styled.div`
@@ -110,6 +130,16 @@ const MoviesGrid = styled.div`
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 1rem;
+  
+  @media (max-width: 768px) {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 0.75rem;
+  }
+  
+  @media (max-width: 480px) {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 0.5rem;
+  }
 `;
 
 const MovieCard = styled(motion.div)`
@@ -140,6 +170,17 @@ const MoviePoster = styled.div`
   position: relative;
   overflow: hidden;
   transition: all 0.3s ease;
+  
+  @media (max-width: 768px) {
+    height: 250px;
+    font-size: 2.5rem;
+  }
+  
+  @media (max-width: 480px) {
+    height: 200px;
+    font-size: 2rem;
+  }
+`;
   
   /* Fallback emoji styling when no thumbnail */
   ${({ $thumbnail }) => !$thumbnail && `

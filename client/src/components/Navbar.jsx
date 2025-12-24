@@ -17,6 +17,15 @@ const NavContainer = styled.nav`
   top: 0;
   z-index: 100;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  
+  @media (max-width: 768px) {
+    padding: 0 1rem;
+    height: 60px;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 0 0.75rem;
+  }
 `;
 
 const LeftSection = styled.div`
@@ -30,6 +39,14 @@ const Logo = styled(Link)`
   font-size: 1.8rem;
   font-weight: bold;
   text-decoration: none;
+  
+  @media (max-width: 768px) {
+    font-size: 1.5rem;
+  }
+  
+  @media (max-width: 480px) {
+    font-size: 1.3rem;
+  }
   
   &:hover {
     opacity: 0.8;

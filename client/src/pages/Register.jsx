@@ -16,6 +16,14 @@ const Container = styled.div`
     rgba(0, 0, 0, 0.3)
   ), url('https://images.unsplash.com/photo-1489599577372-f975c7079ca8?ixlib=rb-4.0.3') center/cover;
   padding: 2rem;
+  
+  @media (max-width: 768px) {
+    padding: 1rem;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 0.75rem;
+  }
 `;
 
 const RegisterCard = styled(motion.div)`
@@ -26,6 +34,14 @@ const RegisterCard = styled(motion.div)`
   width: 100%;
   max-width: 400px;
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+  
+  @media (max-width: 768px) {
+    padding: 2rem;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 1.5rem;
+  }
 `;
 
 const Logo = styled.h1`
@@ -34,6 +50,16 @@ const Logo = styled.h1`
   font-weight: bold;
   text-align: center;
   margin-bottom: 2rem;
+  
+  @media (max-width: 768px) {
+    font-size: 2rem;
+    margin-bottom: 1.5rem;
+  }
+  
+  @media (max-width: 480px) {
+    font-size: 1.75rem;
+    margin-bottom: 1rem;
+  }
 `;
 
 const Title = styled.h2`
@@ -42,6 +68,16 @@ const Title = styled.h2`
   font-weight: 600;
   margin-bottom: 2rem;
   text-align: center;
+  
+  @media (max-width: 768px) {
+    font-size: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+  
+  @media (max-width: 480px) {
+    font-size: 1.3rem;
+    margin-bottom: 1rem;
+  }
 `;
 
 const Form = styled.form`
@@ -162,6 +198,20 @@ const BackToHome = styled(Link)`
   background: rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(10px);
   transition: all 0.2s ease;
+  
+  @media (max-width: 768px) {
+    top: 1rem;
+    left: 1rem;
+    padding: 0.4rem 0.8rem;
+    font-size: 0.9rem;
+  }
+  
+  @media (max-width: 480px) {
+    top: 0.75rem;
+    left: 0.75rem;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.85rem;
+  }
   
   &:hover {
     background: rgba(0, 0, 0, 0.7);

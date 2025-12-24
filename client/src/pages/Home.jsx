@@ -20,6 +20,14 @@ const HomeContainer = styled.div`
 const ContentContainer = styled(motion.div)`
   max-width: 800px;
   padding: 2rem;
+  
+  @media (max-width: 768px) {
+    padding: 1rem;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 0.75rem;
+  }
 `;
 
 const Title = styled.h1`
@@ -31,6 +39,11 @@ const Title = styled.h1`
   @media (max-width: 768px) {
     font-size: 2.5rem;
   }
+  
+  @media (max-width: 480px) {
+    font-size: 2rem;
+    margin-bottom: 0.75rem;
+  }
 `;
 
 const Subtitle = styled.h2`
@@ -41,6 +54,12 @@ const Subtitle = styled.h2`
   
   @media (max-width: 768px) {
     font-size: 1.2rem;
+    margin-bottom: 1.5rem;
+  }
+  
+  @media (max-width: 480px) {
+    font-size: 1rem;
+    margin-bottom: 1rem;
   }
 `;
 
@@ -49,6 +68,16 @@ const Description = styled.p`
   line-height: 1.6;
   margin-bottom: 3rem;
   color: ${({ theme }) => theme.colors.textSecondary};
+  
+  @media (max-width: 768px) {
+    font-size: 1rem;
+    margin-bottom: 2rem;
+  }
+  
+  @media (max-width: 480px) {
+    font-size: 0.9rem;
+    margin-bottom: 1.5rem;
+  }
 `;
 
 const ButtonContainer = styled.div`
@@ -66,6 +95,13 @@ const Button = styled(Link)`
   text-decoration: none;
   border-radius: 4px;
   transition: all 0.3s ease;
+  
+  @media (max-width: 480px) {
+    padding: 0.75rem 1.5rem;
+    font-size: 1rem;
+    width: 100%;
+    text-align: center;
+  }
   
   &.primary {
     background-color: ${({ theme }) => theme.colors.primary};
@@ -96,6 +132,18 @@ const FeatureGrid = styled.div`
   gap: 2rem;
   margin-top: 4rem;
   max-width: 1200px;
+  
+  @media (max-width: 768px) {
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1.5rem;
+    margin-top: 3rem;
+  }
+  
+  @media (max-width: 480px) {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+    margin-top: 2rem;
+  }
 `;
 
 const FeatureCard = styled(motion.div)`
@@ -104,23 +152,46 @@ const FeatureCard = styled(motion.div)`
   border-radius: 8px;
   backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.2);
+  
+  @media (max-width: 768px) {
+    padding: 1.5rem;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 1rem;
+  }
 `;
 
 const FeatureIcon = styled.div`
   font-size: 2.5rem;
   margin-bottom: 1rem;
+  
+  @media (max-width: 480px) {
+    font-size: 2rem;
+    margin-bottom: 0.75rem;
+  }
 `;
 
 const FeatureTitle = styled.h3`
   font-size: 1.3rem;
   margin-bottom: 0.5rem;
   color: white;
+  
+  @media (max-width: 480px) {
+    font-size: 1.1rem;
+    margin-bottom: 0.4rem;
+  }
 `;
 
 const FeatureDescription = styled.p`
   color: ${({ theme }) => theme.colors.textSecondary};
   font-size: 0.95rem;
   line-height: 1.5;
+  
+  @media (max-width: 480px) {
+    font-size: 0.85rem;
+    line-height: 1.4;
+  }
 `;
 
 const features = [
