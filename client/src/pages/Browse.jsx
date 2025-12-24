@@ -180,7 +180,6 @@ const MoviePoster = styled.div`
     height: 200px;
     font-size: 2rem;
   }
-`;
   
   /* Fallback emoji styling when no thumbnail */
   ${({ $thumbnail }) => !$thumbnail && `

@@ -7,6 +7,7 @@ node_modules
 uploads
 thumbnails
 client/node_modules
+client/build
 movies/*.mkv
 movies/*.mp4
 movies/*.avi

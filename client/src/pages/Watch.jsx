@@ -562,14 +562,9 @@ const Watch = () => {
           onCanPlayThrough={() => {
             // Video can play through without buffering
           }}
-          onProgress={(e) => {
-            if (e.target.buffered.length > 0) {
-              const bufferedEnd = e.target.buffered.end(e.target.buffered.length - 1);
-              const duration = e.target.duration;
-              if (duration > 0) {
-                const percentBuffered = (bufferedEnd / duration) * 100;
-              }
-            }
+          onProgress={() => {
+            // Track buffering progress if needed in the future
+            // Buffering progress tracking can be implemented here when needed
           }}
           controls={false}
           crossOrigin="anonymous"
