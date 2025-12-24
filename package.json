@@ -13,6 +13,7 @@
     "install-all": "npm install && npm run install-client",
     "setup": "node install.js",
     "reset-db": "node reset-db.js",
+    "seed-demo": "node seed-demo-data.js",
     "test-auth": "node test-auth.js"
   },
   "keywords": [
