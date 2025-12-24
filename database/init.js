@@ -189,6 +189,11 @@ function initializeTables() {
           createDefaultUsers();
           createDefaultCategories();
           console.log('📋 Database initialization complete');
+          
+          // Auto-seed demo data if database is empty (for fresh deployments)
+          setTimeout(() => {
+            checkAndAutoSeedDemoData();
+          }, 500);
         }, 100);
       }
     });
@@ -337,6 +342,44 @@ const dbMethods = {
     });
   }
 };
+
+// Auto-seed demo data if database is empty (for fresh deployments)
+function checkAndAutoSeedDemoData() {
+  // Check if database has any movies
+  db.get('SELECT COUNT(*) as count FROM movies', (err, row) => {
+    if (err) {
+      console.error('Error checking movies for auto-seed:', err);
+      return;
+    }
+    
+    // If no movies exist, seed demo data
+    if (row && row.count === 0) {
+      console.log('🌱 Database is empty, auto-seeding demo data...');
+      // Import auto-seed module
+      try {
+        const autoSeedPath = path.join(__dirname, '..', 'auto-seed-demo');
+        if (fs.existsSync(autoSeedPath + '.js')) {
+          const autoSeed = require(autoSeedPath);
+          autoSeed.checkAndSeedDemoData(db)
+            .then((seeded) => {
+              if (seeded) {
+                console.log('✅ Demo data auto-seeded successfully!');
+                console.log('🔑 Demo Users: admin/admin123, john/password123, sarah/password123, mike/password123');
+              }
+            })
+            .catch((error) => {
+              console.error('❌ Error auto-seeding demo data:', error);
+            });
+        } else {
+          console.log('💡 Auto-seed module not found. Run "npm run seed-demo" manually to populate demo data');
+        }
+      } catch (error) {
+        console.error('❌ Error loading auto-seed module:', error.message);
+        console.log('💡 Run "npm run seed-demo" manually to populate demo data');
+      }
+    }
+  });
+}
 
 // Graceful shutdown
 process.on('SIGINT', async () => {
