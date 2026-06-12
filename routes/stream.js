@@ -206,7 +206,9 @@ router.get('/:id/playback', streamAuth, async (req, res) => {
     const query = tokenQuery(req);
     const directUrl = profile.streamMode === 'prepared'
       ? `/api/stream/${movie.id}/prepared/${profile.preparedVariant}${query}`
-      : `/api/stream/${movie.id}${query}`;
+      : profile.streamMode === 'direct'
+        ? `/api/stream/${movie.id}${query}`
+        : null;
     logger.info('stream.playback_profile_response', {
       requestId: req.requestId,
       movieId: movie.id,
@@ -227,7 +229,9 @@ router.get('/:id/playback', streamAuth, async (req, res) => {
       title: movie.title,
       streamMode: profile.streamMode,
       directUrl,
-      hlsUrl: `/api/stream/${movie.id}/hls/${profile.hlsVariant}/index.m3u8${query}`,
+      hlsUrl: profile.streamMode === 'hls'
+        ? `/api/stream/${movie.id}/hls/${profile.hlsVariant}/index.m3u8${query}`
+        : null,
       startSeconds: profile.startSeconds,
       compatibility: profile
     });

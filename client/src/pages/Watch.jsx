@@ -745,6 +745,7 @@ const Watch = () => {
     const subtitles = tracks.subtitleTracks || [];
     const selectedAudio = tracks.selectedAudioStreamIndex ?? (audio[0] ? audio[0].streamIndex : null);
     const nextStreamOffset = playback.streamMode === 'hls' ? Number(playback.startSeconds || 0) : 0;
+    const isPreparing = playback.streamMode === 'preparing';
 
     setPlaybackInfo(playback);
     setStreamMode(playback.streamMode || 'direct');
@@ -764,7 +765,17 @@ const Watch = () => {
       return subtitles.some((track) => track.streamIndex === current && track.extractable) ? current : null;
     });
 
+    if (isPreparing) {
+      setVideoSrc('');
+      setVideoError(null);
+      return;
+    }
+
     const sourcePath = playback.streamMode === 'hls' ? playback.hlsUrl : playback.directUrl;
+    if (!sourcePath) {
+      setVideoSrc('');
+      return;
+    }
     const sourceUrl = toAbsoluteUrl(sourcePath);
     setVideoSrc(cacheBust ? addCacheBust(sourceUrl) : sourceUrl);
   }, [addCacheBust, toAbsoluteUrl]);
@@ -857,6 +868,21 @@ const Watch = () => {
 
     return true;
   };
+
+  useEffect(() => {
+    if (!movie || playbackInfo?.streamMode !== 'preparing') {
+      return undefined;
+    }
+
+    const pollPlayback = () => {
+      loadPlayback(movie.id, activeAudio).catch((error) => {
+        console.warn('Prepared MP4 readiness check failed:', error);
+      });
+    };
+
+    const timer = setInterval(pollPlayback, 8000);
+    return () => clearInterval(timer);
+  }, [activeAudio, loadPlayback, movie, playbackInfo?.streamMode]);
 
   const subtitleUrl = (track) => (
     toAbsoluteUrl(`/api/stream/${id}/subtitle/${track.streamIndex}.vtt${tokenParam()}`)
@@ -1355,6 +1381,41 @@ const Watch = () => {
              </button>
            </div>
          )}
+
+        {playbackInfo?.streamMode === 'preparing' && !videoError && (
+          <div style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            background: 'rgba(0,0,0,0.88)',
+            padding: '2rem',
+            borderRadius: '8px',
+            color: 'white',
+            textAlign: 'center',
+            zIndex: 9,
+            maxWidth: '420px'
+          }}>
+            <h3 style={{ color: '#fff', marginBottom: '1rem' }}>Preparing seekable MP4</h3>
+            <p style={{ marginBottom: '1rem', fontSize: '0.95em', color: '#ccc', lineHeight: 1.5 }}>
+              MyFlix is converting this file into a mobile-safe MP4. Playback will start automatically when it is ready.
+            </p>
+            <button
+              onClick={() => movie && loadPlayback(movie.id, activeAudio)}
+              style={{
+                marginTop: '0.5rem',
+                padding: '0.5rem 1rem',
+                background: '#e50914',
+                border: 'none',
+                borderRadius: '4px',
+                color: 'white',
+                cursor: 'pointer'
+              }}
+            >
+              Check Now
+            </button>
+          </div>
+        )}
         
         <Video
           ref={setVideoRef}
@@ -1661,7 +1722,24 @@ const Watch = () => {
         )}
         {playbackInfo && playbackInfo.streamMode === 'hls' && (
           <MovieMeta>
-            <span><strong>Playback:</strong> Preparing MP4; using fallback stream</span>
+            <span><strong>Playback:</strong> Temporary HLS stream</span>
+            {playbackInfo.compatibility?.videoCodec && (
+              <span><strong>Original video:</strong> {playbackInfo.compatibility.videoCodec}</span>
+            )}
+            {playbackInfo.compatibility?.audioCodec && (
+              <span><strong>Original audio:</strong> {playbackInfo.compatibility.audioCodec}</span>
+            )}
+          </MovieMeta>
+        )}
+        {playbackInfo && playbackInfo.streamMode === 'preparing' && (
+          <MovieMeta>
+            <span><strong>Playback:</strong> Preparing seekable MP4</span>
+            {playbackInfo.compatibility?.preparedQueued && (
+              <span>Conversion queued</span>
+            )}
+            {playbackInfo.compatibility?.preparedRunning && (
+              <span>Conversion running</span>
+            )}
             {playbackInfo.compatibility?.videoCodec && (
               <span><strong>Original video:</strong> {playbackInfo.compatibility.videoCodec}</span>
             )}
