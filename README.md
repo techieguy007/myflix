@@ -29,6 +29,7 @@ Important settings:
 - `metadata.omdbApiKeys`: set one or more OMDb keys; MyFlix will try the next key if the first is invalid or rate-limited
 - `metadata.omdbApiKey`: single-key fallback for older configs
 - `OMDB_API_KEYS`: optional comma-separated environment variable for OMDb keys
+- If OMDb returns quota/auth errors such as `401`, MyFlix temporarily pauses that key until the next day so scans do not spam failed lookups
 - `server.host`: `0.0.0.0` allows access from other devices on your local network
 - `server.port`: default `5000`
 
