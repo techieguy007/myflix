@@ -97,6 +97,7 @@ function Get-Runtime {
         Url = if ($hostName -eq "0.0.0.0") { "http://127.0.0.1:$port/" } else { "http://$($hostName):$port/" }
         NodeExe = Resolve-NodeExecutable ([string](Get-NestedValue $Config "service" "nodeExe" "node"))
         LogDirectory = Resolve-ServicePath ([string](Get-NestedValue $Config "service" "logDirectory" "logs")) $RepoDir
+        LogLevel = [string](Get-NestedValue $Config "service" "logLevel" "info")
         OpenBrowserOnStart = [bool](Get-NestedValue $Config "service" "openBrowserOnStart" $false)
         StopExistingOnPort = [bool](Get-NestedValue $Config "service" "stopExistingOnPort" $false)
         NodeEnv = [string](Get-NestedValue $Config "server" "nodeEnv" "production")
@@ -159,6 +160,8 @@ function Show-TaskStatus {
     }
 
     Write-Output "MyFlix URL: $($Runtime.Url)"
+    Write-Output "Log directory: $($Runtime.LogDirectory)"
+    Write-Output "Log level: $($Runtime.LogLevel)"
     $listeners = Get-MyFlixListeners $Runtime.Port $ServerPath
     if (-not $listeners) {
         Write-Output "No listener on port $($Runtime.Port)."
@@ -310,6 +313,8 @@ switch ($Action) {
         $env:HOST = $Runtime.Host
         $env:PORT = "$($Runtime.Port)"
         $env:MYFLIX_MEDIA_ROOT = $Runtime.MediaRoot
+        $env:MYFLIX_LOG_DIR = $Runtime.LogDirectory
+        $env:MYFLIX_LOG_LEVEL = $Runtime.LogLevel
         $env:MYFLIX_RENAME_MODE = $Runtime.RenameMode
         $env:MYFLIX_DISABLE_DEMO_SEED = "true"
         if (-not [string]::IsNullOrWhiteSpace($Runtime.OmdbApiKey)) {

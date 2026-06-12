@@ -15,6 +15,7 @@ const libraryRoutes = require('./routes/library');
 
 require('./database/init');
 const { loadConfig } = require('./lib/config');
+const logger = require('./lib/logger');
 const { runLibraryScan } = require('./lib/libraryScanner');
 const { stopAllTranscodeJobs } = require('./lib/transcoder');
 
@@ -49,6 +50,7 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization']
 }));
+app.use(logger.requestLogger);
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -126,6 +128,12 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 app.use((err, req, res, next) => {
+  logger.error('http.unhandled_error', {
+    requestId: req.requestId,
+    method: req.method,
+    url: logger.redactUrl(req.originalUrl || req.url),
+    error: err
+  });
   console.error('Error:', err.stack);
   res.status(500).json({
     error: 'Something went wrong!',
@@ -138,6 +146,7 @@ function createDirectories() {
   dirs.forEach((dir) => {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
+      logger.info('server.directory_created', { dir });
       console.log(`Created directory: ${dir}`);
     }
   });
@@ -156,18 +165,26 @@ function localNetworkUrls(port) {
 
 function scheduleStartupScan() {
   if (!appConfig.media.autoScanOnStart) {
+    logger.info('library.startup_scan_disabled');
     console.log('Media library startup scan disabled.');
     return;
   }
 
   const delay = appConfig.media.scanDelayMs || 2500;
+  logger.info('library.startup_scan_scheduled', {
+    mediaRoot: appConfig.media.root,
+    delayMs: delay
+  });
   startupScanTimer = setTimeout(() => {
+    logger.info('library.startup_scan_triggered', { mediaRoot: appConfig.media.root });
     console.log(`Scanning media library at ${appConfig.media.root}`);
     runLibraryScan({ trigger: 'startup', config: appConfig })
       .then((result) => {
+        logger.info('library.startup_scan_complete', result);
         console.log('Media library scan complete:', result);
       })
       .catch((error) => {
+        logger.error('library.startup_scan_failed', { error });
         console.error('Media library scan failed:', error.message);
       });
   }, delay);
@@ -175,6 +192,7 @@ function scheduleStartupScan() {
 
 function cleanupTranscodeJobs(reason) {
   const stopped = stopAllTranscodeJobs();
+  logger.info('transcode.cleanup', { reason, stopped });
   if (stopped > 0) {
     console.log(`Stopped ${stopped} transcode job(s) during ${reason}.`);
   }
@@ -185,6 +203,7 @@ function shutdown(reason, exitCode = 0) {
     return;
   }
   shuttingDown = true;
+  logger.warn('server.shutdown_started', { reason, exitCode });
 
   if (startupScanTimer) {
     clearTimeout(startupScanTimer);
@@ -199,10 +218,12 @@ function shutdown(reason, exitCode = 0) {
   }
 
   server.close(() => {
+    logger.warn('server.shutdown_complete', { reason, exitCode });
     process.exit(exitCode);
   });
 
   setTimeout(() => {
+    logger.error('server.shutdown_forced', { reason, exitCode });
     process.exit(exitCode);
   }, 5000).unref();
 }
@@ -210,18 +231,32 @@ function shutdown(reason, exitCode = 0) {
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGHUP', () => shutdown('SIGHUP'));
-process.on('exit', () => cleanupTranscodeJobs('process exit'));
+process.on('exit', (code) => {
+  logger.warn('process.exit', { code });
+  cleanupTranscodeJobs('process exit');
+});
 process.on('uncaughtException', (error) => {
+  logger.error('process.uncaught_exception', { error });
   console.error('Uncaught exception:', error);
   shutdown('uncaught exception', 1);
 });
 process.on('unhandledRejection', (reason) => {
+  logger.error('process.unhandled_rejection', { reason });
   console.error('Unhandled rejection:', reason);
   shutdown('unhandled rejection', 1);
 });
 
 server = app.listen(PORT, HOST, () => {
   createDirectories();
+  logger.info('server.started', {
+    bindHost: HOST,
+    port: PORT,
+    nodeEnv: process.env.NODE_ENV,
+    logFile: logger.LOG_FILE,
+    mediaRoot: appConfig.media.root,
+    autoScanOnStart: appConfig.media.autoScanOnStart,
+    urls: localNetworkUrls(PORT)
+  });
   console.log(`MyFlix server running on ${HOST}:${PORT}`);
   console.log('Access MyFlix at:');
   localNetworkUrls(PORT).forEach((url) => console.log(`  ${url}`));

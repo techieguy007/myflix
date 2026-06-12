@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../database/init');
 const { optionalAuth, authenticateToken, requireAdmin } = require('../middleware/auth');
 const { getScanState, runLibraryScan } = require('../lib/libraryScanner');
+const logger = require('../lib/logger');
 
 const router = express.Router();
 
@@ -56,33 +57,65 @@ router.get('/', optionalAuth, async (req, res) => {
 
     const movies = rows.filter((row) => (row.media_type || 'movie') !== 'episode');
     const episodes = rows.filter((row) => row.media_type === 'episode');
+    const seriesCount = new Set(episodes.map((episode) => episode.series_title || 'Unknown Series')).size;
+    logger.info('library.fetch_complete', {
+      requestId: req.requestId,
+      movies: movies.length,
+      series: seriesCount,
+      episodes: episodes.length,
+      total: rows.length,
+      scanRunning: getScanState().running
+    });
 
     res.json({
       movies,
       series: groupEpisodes(episodes),
       counts: {
         movies: movies.length,
-        series: new Set(episodes.map((episode) => episode.series_title || 'Unknown Series')).size,
+        series: seriesCount,
         episodes: episodes.length,
         total: rows.length
       },
       scan: getScanState()
     });
   } catch (error) {
+    logger.error('library.fetch_failed', {
+      requestId: req.requestId,
+      error
+    });
     console.error('Library fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch library' });
   }
 });
 
 router.get('/scan/status', authenticateToken, requireAdmin, (req, res) => {
+  logger.info('library.scan_status_requested', {
+    requestId: req.requestId,
+    userId: req.user && (req.user.userId || req.user.id),
+    running: getScanState().running
+  });
   res.json(getScanState());
 });
 
 router.post('/scan/rebuild', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    logger.info('library.manual_scan_requested', {
+      requestId: req.requestId,
+      userId: req.user && (req.user.userId || req.user.id)
+    });
     const result = await runLibraryScan({ trigger: 'manual' });
+    logger.info('library.manual_scan_complete', {
+      requestId: req.requestId,
+      userId: req.user && (req.user.userId || req.user.id),
+      result
+    });
     res.json(result);
   } catch (error) {
+    logger.error('library.manual_scan_failed', {
+      requestId: req.requestId,
+      userId: req.user && (req.user.userId || req.user.id),
+      error
+    });
     console.error('Library scan error:', error);
     res.status(500).json({ error: error.message || 'Library scan failed' });
   }

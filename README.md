@@ -131,6 +131,38 @@ The task runs hidden in the background, rebuilds the media index on startup, and
 logs/
 ```
 
+Useful log files while stabilizing the app:
+
+```text
+logs/myflix-app.jsonl       Structured application events, one JSON object per line
+logs/myflix-node.out.log    Node stdout from the background service process
+logs/myflix-node.err.log    Node stderr from the background service process
+logs/myflix-service.out.log Windows task wrapper output
+logs/myflix-service.err.log Windows task wrapper errors
+```
+
+Quick troubleshooting commands:
+
+```powershell
+Get-Content .\logs\myflix-app.jsonl -Tail 80
+Get-Content .\logs\myflix-node.err.log -Tail 80
+.\service\myflix-service.ps1 -Action status
+```
+
+The application log records startup/shutdown, scan progress, metadata lookup failures, auth/admin denials, library API responses, playback profile decisions, HLS transcoding, subtitle extraction, direct streaming, and unhandled process errors. Request logs include `requestId`, status, duration, URL with sensitive query values redacted, user agent, and range headers.
+
+To increase verbosity temporarily, set `service.logLevel` in `config/myflix.config.json`:
+
+```json
+{
+  "service": {
+    "logLevel": "debug"
+  }
+}
+```
+
+Then restart the service.
+
 With the default config, open MyFlix locally at:
 
 ```text

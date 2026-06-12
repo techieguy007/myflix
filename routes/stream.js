@@ -2,6 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const db = require('../database/init');
+const logger = require('../lib/logger');
 const { optionalAuth } = require('../middleware/auth');
 const jwt = require('jsonwebtoken');
 const {
@@ -58,7 +59,11 @@ const streamAuth = async (req, res, next) => {
       req.user = decoded;
     } catch (error) {
       // Invalid token, but continue without auth (optional auth)
-      console.log('Invalid auth token for streaming:', error.message);
+      logger.warn('stream.invalid_auth_token', {
+        requestId: req.requestId,
+        url: logger.redactUrl(req.originalUrl || req.url),
+        error
+      });
     }
   }
   
@@ -111,6 +116,16 @@ router.get('/:id/playback', streamAuth, async (req, res) => {
     const movie = await getStreamMovie(req.params.id);
     const profile = await getPlaybackProfile(movie, selectedAudioFromQuery(req));
     const query = tokenQuery(req);
+    logger.info('stream.playback_profile_response', {
+      requestId: req.requestId,
+      movieId: movie.id,
+      title: movie.title,
+      streamMode: profile.streamMode,
+      hlsVariant: profile.hlsVariant,
+      directPlayable: profile.directPlayable,
+      audioTracks: profile.audioTracks.length,
+      subtitleTracks: profile.subtitleTracks.length
+    });
 
     res.json({
       id: movie.id,
@@ -121,6 +136,11 @@ router.get('/:id/playback', streamAuth, async (req, res) => {
       compatibility: profile
     });
   } catch (error) {
+    logger.error('stream.playback_profile_failed', {
+      requestId: req.requestId,
+      movieId: req.params.id,
+      error
+    });
     console.error('Playback profile error:', error);
     res.status(error.statusCode || 500).json({ error: error.message || 'Playback profile error' });
   }
@@ -132,21 +152,49 @@ router.get('/:id/hls/:variant/:file', streamAuth, async (req, res) => {
     const movie = await getStreamMovie(req.params.id);
     const variant = req.params.variant;
     const fileName = req.params.file;
+    const isManifest = fileName === 'index.m3u8';
     const assetPath = hlsAssetPath(movie.id, movie.video_path, variant, fileName);
 
     if (!assetPath) {
+      logger.warn('stream.hls_invalid_asset_path', {
+        requestId: req.requestId,
+        movieId: movie.id,
+        variant,
+        fileName
+      });
       return res.status(400).json({ error: 'Invalid HLS asset path' });
     }
 
-    if (fileName === 'index.m3u8') {
+    if (isManifest) {
+      logger.info('stream.hls_manifest_requested', {
+        requestId: req.requestId,
+        movieId: movie.id,
+        title: movie.title,
+        variant,
+        assetPath
+      });
       const job = ensureHlsTranscode(movie, optionsFromVariant(variant));
       const ready = job.ready || await waitForFile(job.manifestPath, 25000);
       if (!ready) {
+        logger.warn('stream.hls_manifest_not_ready', {
+          requestId: req.requestId,
+          movieId: movie.id,
+          variant,
+          manifestPath: job.manifestPath,
+          transcodeRunning: job.running
+        });
         return res.status(503).json({ error: 'Transcode is still starting. Retry in a few seconds.' });
       }
     }
 
     if (!fs.existsSync(assetPath)) {
+      logger.warn('stream.hls_asset_missing', {
+        requestId: req.requestId,
+        movieId: movie.id,
+        variant,
+        fileName,
+        assetPath
+      });
       return res.status(404).json({ error: 'HLS asset not ready' });
     }
 
@@ -158,6 +206,13 @@ router.get('/:id/hls/:variant/:file', streamAuth, async (req, res) => {
 
     return res.sendFile(assetPath);
   } catch (error) {
+    logger.error('stream.hls_failed', {
+      requestId: req.requestId,
+      movieId: req.params.id,
+      variant: req.params.variant,
+      fileName: req.params.file,
+      error
+    });
     console.error('HLS streaming error:', error);
     return res.status(error.statusCode || 500).json({ error: error.message || 'HLS streaming error' });
   }
@@ -167,6 +222,13 @@ router.get('/:id/subtitle/:streamIndex.vtt', streamAuth, async (req, res) => {
   try {
     const movie = await getStreamMovie(req.params.id);
     const subtitlePath = await ensureSubtitleTrack(movie, req.params.streamIndex);
+    logger.info('stream.subtitle_served', {
+      requestId: req.requestId,
+      movieId: movie.id,
+      title: movie.title,
+      streamIndex: req.params.streamIndex,
+      subtitlePath
+    });
 
     res.set({
       'Content-Type': 'text/vtt; charset=utf-8',
@@ -176,6 +238,12 @@ router.get('/:id/subtitle/:streamIndex.vtt', streamAuth, async (req, res) => {
 
     return res.sendFile(subtitlePath);
   } catch (error) {
+    logger.error('stream.subtitle_failed', {
+      requestId: req.requestId,
+      movieId: req.params.id,
+      streamIndex: req.params.streamIndex,
+      error
+    });
     console.error('Subtitle extraction error:', error);
     return res.status(error.statusCode || 500).json({ error: error.message || 'Subtitle extraction error' });
   }
@@ -191,16 +259,24 @@ router.get('/:id', streamAuth, async (req, res) => {
     const movie = await db.get('SELECT video_path, title, file_size FROM movies WHERE id = ?', [movieId]);
     
     if (!movie) {
+      logger.warn('stream.direct_movie_missing', {
+        requestId: req.requestId,
+        movieId
+      });
       console.error(`Movie not found in database: ${movieId}`);
       return res.status(404).json({ error: 'Movie not found' });
     }
-    
-    console.log(`📁 Movie found: ${movie.title} at ${movie.video_path}`);
     
     const videoPath = movie.video_path;
     
     // Check if file exists
     if (!fs.existsSync(videoPath)) {
+      logger.warn('stream.direct_file_missing', {
+        requestId: req.requestId,
+        movieId,
+        title: movie.title,
+        videoPath
+      });
       console.error(`❌ Video file not found at path: ${videoPath}`);
       return res.status(404).json({ error: 'Video file not found' });
     }
@@ -213,6 +289,16 @@ router.get('/:id', streamAuth, async (req, res) => {
     const mimeType = getMimeType(videoPath);
     const isCompatible = isBrowserCompatible(videoPath);
     const fileName = path.basename(videoPath);
+    logger.info('stream.direct_started', {
+      requestId: req.requestId,
+      movieId,
+      title: movie.title,
+      fileName,
+      mimeType,
+      fileSize,
+      range: range || null,
+      isCompatible
+    });
     
     // Check compatibility (informational only)
 
@@ -225,6 +311,17 @@ router.get('/:id', streamAuth, async (req, res) => {
 
       // Create readable stream for the requested range
       const file = fs.createReadStream(videoPath, { start, end });
+      file.on('error', (error) => {
+        logger.error('stream.direct_read_failed', {
+          requestId: req.requestId,
+          movieId,
+          title: movie.title,
+          videoPath,
+          start,
+          end,
+          error
+        });
+      });
 
       const head = {
         'Content-Range': `bytes ${start}-${end}/${fileSize}`,
@@ -239,6 +336,17 @@ router.get('/:id', streamAuth, async (req, res) => {
       file.pipe(res);
     } else {
       // No range requested, send entire file
+      const file = fs.createReadStream(videoPath);
+      file.on('error', (error) => {
+        logger.error('stream.direct_read_failed', {
+          requestId: req.requestId,
+          movieId,
+          title: movie.title,
+          videoPath,
+          error
+        });
+      });
+
       const head = {
         'Content-Length': fileSize,
         'Content-Type': mimeType,
@@ -248,7 +356,7 @@ router.get('/:id', streamAuth, async (req, res) => {
       };
 
       res.writeHead(200, head);
-      fs.createReadStream(videoPath).pipe(res);
+      file.pipe(res);
     }
 
     // Log viewing (optional, for analytics)
@@ -258,10 +366,23 @@ router.get('/:id', streamAuth, async (req, res) => {
         INSERT OR REPLACE INTO watch_history (user_id, movie_id, watch_time, last_watched)
         VALUES (?, ?, COALESCE((SELECT watch_time FROM watch_history WHERE user_id = ? AND movie_id = ?), 0), CURRENT_TIMESTAMP)
       `, [req.user.userId, movieId, req.user.userId, movieId])
-        .catch(err => console.error('Error logging view:', err));
+        .catch((error) => {
+          logger.warn('stream.watch_history_failed', {
+            requestId: req.requestId,
+            movieId,
+            userId: req.user.userId,
+            error
+          });
+          console.error('Error logging view:', error);
+        });
     }
 
   } catch (error) {
+    logger.error('stream.direct_failed', {
+      requestId: req.requestId,
+      movieId: req.params.id,
+      error
+    });
     console.error('Streaming error:', error);
     res.status(500).json({ error: 'Streaming error' });
   }

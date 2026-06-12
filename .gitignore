@@ -11,6 +11,7 @@ thumbnails
 client/node_modules
 client/build
 logs/*.log
+logs/*.jsonl
 transcodes/
 movies/*.mkv
 movies/*.mp4

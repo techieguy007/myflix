@@ -23,6 +23,7 @@
   "service": {
     "nodeExe": "C:\\Program Files\\nodejs\\node.exe",
     "logDirectory": "logs",
+    "logLevel": "info",
     "openBrowserOnStart": false,
     "stopExistingOnPort": false
   }
