@@ -261,6 +261,7 @@ const Watch = () => {
   const hlsRef = useRef(null);
   const hlsRecoveryRef = useRef({ network: 0, media: 0, native: 0 });
   const hlsRetryTimerRef = useRef(null);
+  const hlsReloadRef = useRef({ count: 0, timer: null });
   const currentTimeRef = useRef(0);
   const streamOffsetRef = useRef(0);
 
@@ -319,6 +320,10 @@ const Watch = () => {
     if (hlsRetryTimerRef.current) {
       clearTimeout(hlsRetryTimerRef.current);
       hlsRetryTimerRef.current = null;
+    }
+    if (hlsReloadRef.current.timer) {
+      clearTimeout(hlsReloadRef.current.timer);
+      hlsReloadRef.current.timer = null;
     }
   }, []);
 
@@ -381,6 +386,7 @@ const Watch = () => {
     const hls = new Hls({
       enableWorker: true,
       lowLatencyMode: false,
+      startPosition: 0,
       maxBufferLength: 60,
       backBufferLength: 30,
       manifestLoadingMaxRetry: 12,
@@ -400,6 +406,7 @@ const Watch = () => {
     hls.attachMedia(videoRef);
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
       hlsRecoveryRef.current = { network: 0, media: 0, native: 0 };
+      hlsReloadRef.current.count = 0;
       setVideoError(null);
     });
     hls.on(Hls.Events.ERROR, (event, data) => {
@@ -475,7 +482,11 @@ const Watch = () => {
     pathOrUrl && pathOrUrl.startsWith('http') ? pathOrUrl : `${baseUrl}${pathOrUrl}`
   );
 
-  const applyPlayback = (playback) => {
+  const addCacheBust = (url) => (
+    `${url}${url.includes('?') ? '&' : '?'}r=${Date.now()}`
+  );
+
+  const applyPlayback = (playback, cacheBust = false) => {
     const tracks = playback.compatibility || {};
     const audio = tracks.audioTracks || [];
     const subtitles = tracks.subtitleTracks || [];
@@ -493,10 +504,11 @@ const Watch = () => {
     ));
 
     const sourcePath = playback.streamMode === 'hls' ? playback.hlsUrl : playback.directUrl;
-    setVideoSrc(toAbsoluteUrl(sourcePath));
+    const sourceUrl = toAbsoluteUrl(sourcePath);
+    setVideoSrc(cacheBust ? addCacheBust(sourceUrl) : sourceUrl);
   };
 
-  const loadPlayback = async (movieId, audioStreamIndex = null, startSeconds = 0) => {
+  const loadPlayback = async (movieId, audioStreamIndex = null, startSeconds = 0, options = {}) => {
     const params = new URLSearchParams();
     const token = localStorage.getItem('authToken');
     if (token) params.set('token', token);
@@ -507,7 +519,53 @@ const Watch = () => {
 
     const query = params.toString() ? `?${params.toString()}` : '';
     const playbackResponse = await api.get(`/api/stream/${movieId}/playback${query}`);
-    applyPlayback(playbackResponse.data);
+    applyPlayback(playbackResponse.data, Boolean(options.cacheBust));
+  };
+
+  const recoverHlsByReload = (reason, retryPlayback = false) => {
+    if (!movie || streamMode !== 'hls') {
+      return false;
+    }
+
+    const localTime = videoRef && Number.isFinite(videoRef.currentTime) ? videoRef.currentTime : 0;
+    const absoluteTime = Number.isFinite(currentTimeRef.current) && currentTimeRef.current > 0
+      ? currentTimeRef.current
+      : streamOffsetRef.current + localTime;
+    const startAt = Math.max(0, absoluteTime - 2);
+    const shouldResume = retryPlayback || Boolean(videoRef && !videoRef.paused) || isPlaying;
+
+    hlsReloadRef.current.count += 1;
+    if (hlsReloadRef.current.count > 30) {
+      return false;
+    }
+
+    if (hlsReloadRef.current.timer) {
+      clearTimeout(hlsReloadRef.current.timer);
+    }
+
+    setVideoError(null);
+    if (videoRef) {
+      videoRef.pause();
+    }
+    shouldResumeRef.current = shouldResume;
+    console.warn('Reloading HLS stream after playback hiccup', {
+      reason,
+      startAt,
+      retry: hlsReloadRef.current.count
+    });
+
+    const delay = Math.min(5000, 500 + hlsReloadRef.current.count * 250);
+    hlsReloadRef.current.timer = setTimeout(() => {
+      loadPlayback(movie.id, activeAudio, startAt, { cacheBust: true }).catch((error) => {
+        console.error('HLS stream reload failed:', error);
+        setVideoError({
+          message: 'Browser-compatible stream failed',
+          details: 'MyFlix could not reload the stream at the current timestamp.'
+        });
+      });
+    }, delay);
+
+    return true;
   };
 
   const subtitleUrl = (track) => (
@@ -847,6 +905,9 @@ const Watch = () => {
              <button 
                onClick={() => {
                  setVideoError(null);
+                 if (streamMode === 'hls' && Hls.isSupported() && recoverHlsByReload('manual retry', true)) {
+                   return;
+                 }
                  if (streamMode === 'hls' && Hls.isSupported() && scheduleHlsRecovery('manual retry', true)) {
                    return;
                  }
@@ -893,14 +954,14 @@ const Watch = () => {
             if (e.target.error) {
               if (streamMode === 'hls' && Hls.isSupported()) {
                 hlsRecoveryRef.current.native += 1;
-                if (hlsRecoveryRef.current.native <= 8) {
-                  const recovered = scheduleHlsRecovery(
-                    `native video error ${e.target.error.code}`,
-                    !e.target.paused || isPlaying
-                  );
-                  if (recovered) {
-                    return;
-                  }
+                const reason = `native video error ${e.target.error.code}`;
+                const retryPlayback = !e.target.paused || isPlaying;
+                if (recoverHlsByReload(reason, retryPlayback)) {
+                  return;
+                }
+                if (hlsRecoveryRef.current.native <= 12
+                  && scheduleHlsRecovery(reason, retryPlayback)) {
+                  return;
                 }
               }
 
@@ -941,10 +1002,12 @@ const Watch = () => {
           }}
           onCanPlay={() => {
             hlsRecoveryRef.current = { network: 0, media: 0, native: 0 };
+            hlsReloadRef.current.count = 0;
             setVideoError(null);
           }}
           onCanPlayThrough={() => {
             hlsRecoveryRef.current = { network: 0, media: 0, native: 0 };
+            hlsReloadRef.current.count = 0;
             setVideoError(null);
           }}
           onProgress={() => {
