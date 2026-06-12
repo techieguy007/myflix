@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from 'react-query';
 import styled from 'styled-components';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { FiUpload, FiTrash2, FiEdit, FiPlus, FiX, FiCheck, FiCheckSquare, FiSquare } from 'react-icons/fi';
+import { FiUpload, FiTrash2, FiEdit, FiPlus, FiX, FiCheck, FiCheckSquare, FiSquare, FiRefreshCw } from 'react-icons/fi';
 import api from '../utils/api';
 
 const Container = styled.div`
@@ -387,6 +387,35 @@ const Button = styled.button.withConfig({
   }}
 `;
 
+const formatBytes = (value) => {
+  const bytes = Number(value || 0);
+  if (!bytes) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${(bytes / (1024 ** index)).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+};
+
+const formatDateTime = (value) => {
+  if (!value) return '-';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+};
+
+const conversionStatusStyle = (status) => {
+  switch (status) {
+    case 'deleted':
+      return { color: '#46d369', label: 'Converted, original deleted' };
+    case 'promoted':
+      return { color: '#4da3ff', label: 'Converted, delete pending' };
+    case 'prepared-kept':
+      return { color: '#f5c542', label: 'Converted, original kept' };
+    case 'delete-failed':
+      return { color: '#ff5c5c', label: 'Converted, delete failed' };
+    default:
+      return { color: '#ccc', label: status || 'Unknown' };
+  }
+};
+
 const Admin = () => {
   const [activeTab, setActiveTab] = useState('scan');
   const [selectedFile, setSelectedFile] = useState(null);
@@ -410,6 +439,19 @@ const Admin = () => {
       const response = await api.get('/api/movies');
       return response.data.movies || [];
     }
+  });
+
+  const {
+    data: conversionData,
+    isLoading: conversionsLoading,
+    refetch: refetchConversions
+  } = useQuery({
+    queryKey: ['admin-conversions'],
+    queryFn: async () => {
+      const response = await api.get('/api/library/conversions?limit=100');
+      return response.data;
+    },
+    enabled: activeTab === 'conversions'
   });
 
   // Delete movie mutation
@@ -722,6 +764,12 @@ const Admin = () => {
           onClick={() => handleTabChange('manage')}
         >
           Manage Movies
+        </Tab>
+        <Tab
+          active={activeTab === 'conversions'}
+          onClick={() => handleTabChange('conversions')}
+        >
+          Conversions
         </Tab>
       </TabContainer>
 
@@ -1137,6 +1185,124 @@ const Admin = () => {
             )}
           </div>
         )}
+
+        {activeTab === 'conversions' && (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '2rem' }}>
+              <div>
+                <h2 style={{ color: 'white', fontSize: '1.5rem', margin: 0 }}>
+                  Conversion History
+                </h2>
+                <p style={{ color: '#b3b3b3', marginTop: '0.5rem' }}>
+                  Files prepared into browser-compatible MP4 and what happened to their originals.
+                </p>
+              </div>
+              <SelectionButton
+                variant="secondary"
+                onClick={() => refetchConversions()}
+                disabled={conversionsLoading}
+              >
+                <FiRefreshCw /> Refresh
+              </SelectionButton>
+            </div>
+
+            {conversionsLoading ? (
+              <div style={{ textAlign: 'center', padding: '2rem' }}>
+                <LoadingSpinner />
+              </div>
+            ) : (
+              <>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                  gap: '1rem',
+                  marginBottom: '2rem'
+                }}>
+                  {[
+                    ['Total records', conversionData?.totals?.total || 0],
+                    ['Originals deleted', conversionData?.totals?.originalsDeleted || 0],
+                    ['Originals kept', conversionData?.totals?.originalsKept || 0],
+                    ['Converted size', formatBytes(conversionData?.totals?.convertedBytes)]
+                  ].map(([label, value]) => (
+                    <div
+                      key={label}
+                      style={{
+                        background: '#222',
+                        border: '1px solid #333',
+                        borderRadius: '8px',
+                        padding: '1rem'
+                      }}
+                    >
+                      <div style={{ color: '#999', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{label}</div>
+                      <div style={{ color: 'white', fontSize: '1.5rem', fontWeight: 700 }}>{value}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {!conversionData?.conversions?.length ? (
+                  <div style={{ textAlign: 'center', padding: '3rem', color: '#999', background: '#222', borderRadius: '8px' }}>
+                    No conversions recorded yet. Play an incompatible file and it will appear here after MP4 preparation completes.
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto', border: '1px solid #333', borderRadius: '8px' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '980px' }}>
+                      <thead>
+                        <tr style={{ background: '#222', color: '#b3b3b3', textAlign: 'left' }}>
+                          <th style={{ padding: '0.9rem' }}>Title</th>
+                          <th style={{ padding: '0.9rem' }}>Status</th>
+                          <th style={{ padding: '0.9rem' }}>Codecs</th>
+                          <th style={{ padding: '0.9rem' }}>Size</th>
+                          <th style={{ padding: '0.9rem' }}>Updated</th>
+                          <th style={{ padding: '0.9rem' }}>Paths</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {conversionData.conversions.map((item) => {
+                          const status = conversionStatusStyle(item.status);
+                          return (
+                            <tr key={item.id} style={{ borderTop: '1px solid #333', color: '#ddd', verticalAlign: 'top' }}>
+                              <td style={{ padding: '0.9rem', fontWeight: 600 }}>
+                                {item.title || `Movie ${item.movie_id}`}
+                                <div style={{ color: '#777', fontSize: '0.8rem', marginTop: '0.25rem' }}>
+                                  ID {item.movie_id || '-'}
+                                </div>
+                              </td>
+                              <td style={{ padding: '0.9rem' }}>
+                                <span style={{ color: status.color, fontWeight: 700 }}>{status.label}</span>
+                                {item.reason && (
+                                  <div style={{ color: '#888', fontSize: '0.8rem', marginTop: '0.25rem' }}>
+                                    {item.reason}
+                                  </div>
+                                )}
+                              </td>
+                              <td style={{ padding: '0.9rem', color: '#b3b3b3' }}>
+                                <div>{item.video_codec || 'unknown'} / {item.audio_codec || 'unknown'}</div>
+                                <div style={{ color: '#777', fontSize: '0.8rem', marginTop: '0.25rem' }}>
+                                  {item.audio_tracks || 0} audio, {item.subtitle_tracks || 0} subtitles
+                                </div>
+                              </td>
+                              <td style={{ padding: '0.9rem', color: '#b3b3b3' }}>
+                                <div>Original: {formatBytes(item.source_size)}</div>
+                                <div>MP4: {formatBytes(item.replacement_size)}</div>
+                              </td>
+                              <td style={{ padding: '0.9rem', color: '#b3b3b3' }}>
+                                {formatDateTime(item.updated_at || item.created_at)}
+                              </td>
+                              <td style={{ padding: '0.9rem', color: '#aaa', fontSize: '0.8rem', lineHeight: 1.5 }}>
+                                <div><strong>Current:</strong> <code>{item.current_video_path || item.replacement_path || item.prepared_path || '-'}</code></div>
+                                <div><strong>Original:</strong> <code>{item.source_path || '-'}</code></div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </Content>
 
       {/* Edit Movie Modal */}
@@ -1409,4 +1575,4 @@ const Admin = () => {
   );
 };
 
-export default Admin; 
+export default Admin;

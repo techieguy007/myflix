@@ -221,6 +221,34 @@ function initializeTables() {
         }, 100);
       }
     });
+
+    db.run(`
+      CREATE TABLE IF NOT EXISTS media_conversions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        movie_id INTEGER,
+        title TEXT,
+        source_path TEXT,
+        replacement_path TEXT,
+        prepared_path TEXT,
+        status TEXT NOT NULL,
+        reason TEXT,
+        source_size INTEGER,
+        replacement_size INTEGER,
+        audio_tracks INTEGER DEFAULT 0,
+        subtitle_tracks INTEGER DEFAULT 0,
+        video_codec TEXT,
+        audio_codec TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (movie_id) REFERENCES movies (id)
+      )
+    `, (err) => {
+      if (err) {
+        console.error('Error creating media_conversions table:', err);
+      } else {
+        console.log('Media conversions table ready');
+      }
+    });
   });
 }
 

@@ -122,6 +122,59 @@ router.get('/scan/status', authenticateToken, requireAdmin, (req, res) => {
   res.json(getScanState());
 });
 
+router.get('/conversions', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const limit = Math.max(1, Math.min(500, Number(req.query.limit || 100)));
+    const rows = await db.all(`
+      SELECT
+        c.id, c.movie_id, c.title, c.source_path, c.replacement_path, c.prepared_path,
+        c.status, c.reason, c.source_size, c.replacement_size, c.audio_tracks,
+        c.subtitle_tracks, c.video_codec, c.audio_codec, c.created_at, c.updated_at,
+        m.video_path AS current_video_path
+      FROM media_conversions c
+      LEFT JOIN movies m ON m.id = c.movie_id
+      ORDER BY c.updated_at DESC, c.id DESC
+      LIMIT ?
+    `, [limit]);
+    const summaryRows = await db.all(`
+      SELECT status, COUNT(*) AS count
+      FROM media_conversions
+      GROUP BY status
+    `);
+    const summary = summaryRows.reduce((acc, row) => {
+      acc[row.status] = row.count;
+      return acc;
+    }, {});
+    const totals = await db.get(`
+      SELECT
+        COUNT(*) AS total,
+        COALESCE(SUM(CASE WHEN status = 'deleted' THEN 1 ELSE 0 END), 0) AS originalsDeleted,
+        COALESCE(SUM(CASE WHEN status = 'prepared-kept' THEN 1 ELSE 0 END), 0) AS originalsKept,
+        COALESCE(SUM(CASE WHEN replacement_path IS NOT NULL THEN replacement_size ELSE 0 END), 0) AS convertedBytes
+      FROM media_conversions
+    `);
+
+    logger.info('library.conversions_requested', {
+      requestId: req.requestId,
+      userId: req.user && (req.user.userId || req.user.id),
+      limit,
+      returned: rows.length
+    });
+    res.json({
+      conversions: rows,
+      summary,
+      totals
+    });
+  } catch (error) {
+    logger.error('library.conversions_failed', {
+      requestId: req.requestId,
+      userId: req.user && (req.user.userId || req.user.id),
+      error
+    });
+    res.status(500).json({ error: 'Failed to fetch conversion history' });
+  }
+});
+
 router.post('/scan/rebuild', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const forceRescan = req.body?.force === true || req.query.force === 'true';
