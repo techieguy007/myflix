@@ -247,6 +247,7 @@ const Watch = () => {
   const [videoRef, setVideoRef] = useState(null);
   const resumeTimeRef = useRef(0);
   const shouldResumeRef = useRef(false);
+  const pendingAutoResumeRef = useRef(false);
   const [audioTracks, setAudioTracks] = useState([]);
   const [activeAudio, setActiveAudio] = useState(null);
   const [showAudioMenu, setShowAudioMenu] = useState(false);
@@ -264,6 +265,57 @@ const Watch = () => {
   const hlsReloadRef = useRef({ count: 0, timer: null });
   const currentTimeRef = useRef(0);
   const streamOffsetRef = useRef(0);
+  const playbackRequestRef = useRef(0);
+
+  const reservePlaybackRequest = useCallback(() => {
+    playbackRequestRef.current += 1;
+    return playbackRequestRef.current;
+  }, []);
+
+  const clearHlsRetryTimer = useCallback(() => {
+    if (hlsRetryTimerRef.current) {
+      clearTimeout(hlsRetryTimerRef.current);
+      hlsRetryTimerRef.current = null;
+    }
+  }, []);
+
+  const clearHlsReloadTimer = useCallback(() => {
+    if (hlsReloadRef.current.timer) {
+      clearTimeout(hlsReloadRef.current.timer);
+      hlsReloadRef.current.timer = null;
+    }
+  }, []);
+
+  const cancelPendingHlsRecovery = useCallback(() => {
+    clearHlsRetryTimer();
+    clearHlsReloadTimer();
+  }, [clearHlsReloadTimer, clearHlsRetryTimer]);
+
+  const markPlaybackAutoResume = useCallback((shouldResume) => {
+    const nextShouldResume = Boolean(shouldResume);
+    pendingAutoResumeRef.current = nextShouldResume;
+    shouldResumeRef.current = nextShouldResume;
+  }, []);
+
+  const tryResumePlayback = useCallback((reason) => {
+    if (!videoRef || (!pendingAutoResumeRef.current && !shouldResumeRef.current)) {
+      return false;
+    }
+
+    if (videoRef.readyState < 2) {
+      return false;
+    }
+
+    pendingAutoResumeRef.current = false;
+    shouldResumeRef.current = false;
+    setVideoError(null);
+    videoRef.play().catch((error) => {
+      pendingAutoResumeRef.current = true;
+      shouldResumeRef.current = true;
+      console.warn(`Unable to resume playback after ${reason}:`, error);
+    });
+    return true;
+  }, [videoRef]);
 
   const getKnownDuration = useCallback(() => {
     if (videoRef && Number.isFinite(videoRef.duration) && videoRef.duration > 0) {
@@ -317,15 +369,8 @@ const Watch = () => {
   }, []);
 
   useEffect(() => () => {
-    if (hlsRetryTimerRef.current) {
-      clearTimeout(hlsRetryTimerRef.current);
-      hlsRetryTimerRef.current = null;
-    }
-    if (hlsReloadRef.current.timer) {
-      clearTimeout(hlsReloadRef.current.timer);
-      hlsReloadRef.current.timer = null;
-    }
-  }, []);
+    cancelPendingHlsRecovery();
+  }, [cancelPendingHlsRecovery]);
 
   const scheduleHlsRecovery = useCallback((reason, retryPlayback = false) => {
     if (!videoRef || streamMode !== 'hls') {
@@ -341,9 +386,7 @@ const Watch = () => {
     setVideoError(null);
     console.warn(`Recovering HLS playback after ${reason}`, { resumeAt, retryPlayback });
 
-    if (hlsRetryTimerRef.current) {
-      clearTimeout(hlsRetryTimerRef.current);
-    }
+    clearHlsRetryTimer();
 
     hlsRetryTimerRef.current = setTimeout(() => {
       try {
@@ -362,7 +405,7 @@ const Watch = () => {
     }, 800);
 
     return true;
-  }, [videoRef, streamMode]);
+  }, [clearHlsRetryTimer, videoRef, streamMode]);
 
   useEffect(() => {
     if (!videoRef || !videoSrc || streamMode !== 'hls') {
@@ -408,6 +451,7 @@ const Watch = () => {
       hlsRecoveryRef.current = { network: 0, media: 0, native: 0 };
       hlsReloadRef.current.count = 0;
       setVideoError(null);
+      tryResumePlayback('HLS manifest parsed');
     });
     hls.on(Hls.Events.ERROR, (event, data) => {
       if (!data.fatal) {
@@ -469,24 +513,24 @@ const Watch = () => {
       }
       hls.destroy();
     };
-  }, [videoRef, videoSrc, streamMode, scheduleHlsRecovery]);
+  }, [videoRef, videoSrc, streamMode, scheduleHlsRecovery, tryResumePlayback]);
 
   const baseUrl = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5000';
 
-  const tokenParam = () => {
+  const tokenParam = useCallback(() => {
     const token = localStorage.getItem('authToken');
     return token ? `?token=${encodeURIComponent(token)}` : '';
-  };
+  }, []);
 
-  const toAbsoluteUrl = (pathOrUrl) => (
+  const toAbsoluteUrl = useCallback((pathOrUrl) => (
     pathOrUrl && pathOrUrl.startsWith('http') ? pathOrUrl : `${baseUrl}${pathOrUrl}`
-  );
+  ), [baseUrl]);
 
-  const addCacheBust = (url) => (
+  const addCacheBust = useCallback((url) => (
     `${url}${url.includes('?') ? '&' : '?'}r=${Date.now()}`
-  );
+  ), []);
 
-  const applyPlayback = (playback, cacheBust = false) => {
+  const applyPlayback = useCallback((playback, cacheBust = false) => {
     const tracks = playback.compatibility || {};
     const audio = tracks.audioTracks || [];
     const subtitles = tracks.subtitleTracks || [];
@@ -506,9 +550,10 @@ const Watch = () => {
     const sourcePath = playback.streamMode === 'hls' ? playback.hlsUrl : playback.directUrl;
     const sourceUrl = toAbsoluteUrl(sourcePath);
     setVideoSrc(cacheBust ? addCacheBust(sourceUrl) : sourceUrl);
-  };
+  }, [addCacheBust, toAbsoluteUrl]);
 
-  const loadPlayback = async (movieId, audioStreamIndex = null, startSeconds = 0, options = {}) => {
+  const loadPlayback = useCallback(async (movieId, audioStreamIndex = null, startSeconds = 0, options = {}) => {
+    const requestId = options.requestId ?? reservePlaybackRequest();
     const params = new URLSearchParams();
     const token = localStorage.getItem('authToken');
     if (token) params.set('token', token);
@@ -519,8 +564,19 @@ const Watch = () => {
 
     const query = params.toString() ? `?${params.toString()}` : '';
     const playbackResponse = await api.get(`/api/stream/${movieId}/playback${query}`);
+    if (requestId !== playbackRequestRef.current) {
+      console.info('Ignoring stale playback profile response', {
+        movieId,
+        startSeconds,
+        requestId,
+        latestRequestId: playbackRequestRef.current
+      });
+      return false;
+    }
+
     applyPlayback(playbackResponse.data, Boolean(options.cacheBust));
-  };
+    return true;
+  }, [applyPlayback, reservePlaybackRequest]);
 
   const recoverHlsByReload = (reason, retryPlayback = false) => {
     if (!movie || streamMode !== 'hls') {
@@ -539,24 +595,40 @@ const Watch = () => {
       return false;
     }
 
-    if (hlsReloadRef.current.timer) {
-      clearTimeout(hlsReloadRef.current.timer);
-    }
+    clearHlsRetryTimer();
+    clearHlsReloadTimer();
+    const requestId = reservePlaybackRequest();
 
     setVideoError(null);
     if (videoRef) {
       videoRef.pause();
     }
-    shouldResumeRef.current = shouldResume;
+    markPlaybackAutoResume(shouldResume);
     console.warn('Reloading HLS stream after playback hiccup', {
       reason,
       startAt,
-      retry: hlsReloadRef.current.count
+      retry: hlsReloadRef.current.count,
+      requestId
     });
 
     const delay = Math.min(5000, 500 + hlsReloadRef.current.count * 250);
     hlsReloadRef.current.timer = setTimeout(() => {
-      loadPlayback(movie.id, activeAudio, startAt, { cacheBust: true }).catch((error) => {
+      hlsReloadRef.current.timer = null;
+      if (requestId !== playbackRequestRef.current) {
+        console.info('Skipping stale HLS stream reload', {
+          reason,
+          startAt,
+          requestId,
+          latestRequestId: playbackRequestRef.current
+        });
+        return;
+      }
+
+      loadPlayback(movie.id, activeAudio, startAt, { cacheBust: true, requestId }).catch((error) => {
+        if (requestId !== playbackRequestRef.current) {
+          return;
+        }
+
         console.error('HLS stream reload failed:', error);
         setVideoError({
           message: 'Browser-compatible stream failed',
@@ -661,12 +733,7 @@ const Watch = () => {
 
       applySubtitleSelection();
 
-      if (shouldResumeRef.current) {
-        shouldResumeRef.current = false;
-        videoRef.play().catch((error) => {
-          console.warn('Unable to resume playback after track change:', error);
-        });
-      }
+      tryResumePlayback('metadata loaded');
     }
   };
 
@@ -688,7 +755,7 @@ const Watch = () => {
       videoDuration || Number.MAX_SAFE_INTEGER,
       Math.max(0, targetTime)
     );
-    const wasPlaying = !videoRef.paused;
+    const wasPlaying = isPlaying || !videoRef.paused || pendingAutoResumeRef.current || shouldResumeRef.current;
 
     console.info('Video seek requested', {
       reason,
@@ -704,10 +771,17 @@ const Watch = () => {
     setVideoError(null);
 
     if (streamMode === 'hls' && movie) {
+      cancelPendingHlsRecovery();
+      hlsReloadRef.current.count = 0;
       resumeTimeRef.current = 0;
-      shouldResumeRef.current = wasPlaying;
+      const requestId = reservePlaybackRequest();
+      markPlaybackAutoResume(wasPlaying);
       videoRef.pause();
-      loadPlayback(movie.id, activeAudio, nextTime).catch((error) => {
+      loadPlayback(movie.id, activeAudio, nextTime, { cacheBust: true, requestId }).catch((error) => {
+        if (requestId !== playbackRequestRef.current) {
+          return;
+        }
+
         console.error('Failed to seek HLS stream:', error);
         setVideoError({
           message: 'Seek failed',
@@ -741,7 +815,18 @@ const Watch = () => {
         console.warn('Unable to resume playback after seek:', error);
       });
     }
-  }, [activeAudio, getKnownDuration, movie, streamMode, videoRef]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [
+    activeAudio,
+    cancelPendingHlsRecovery,
+    getKnownDuration,
+    isPlaying,
+    loadPlayback,
+    markPlaybackAutoResume,
+    movie,
+    reservePlaybackRequest,
+    streamMode,
+    videoRef
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const seekBy = useCallback((seconds) => {
     seekTo(currentTimeRef.current + seconds, seconds > 0 ? 'keyboard-forward' : 'keyboard-back');
@@ -829,12 +914,17 @@ const Watch = () => {
       resumeTimeRef.current = streamMode === 'hls'
         ? currentTimeRef.current
         : (videoRef ? videoRef.currentTime : 0);
-      shouldResumeRef.current = isPlaying;
+      const shouldResume = isPlaying || Boolean(videoRef && !videoRef.paused);
+      const requestId = reservePlaybackRequest();
+      markPlaybackAutoResume(shouldResume);
       setVideoError(null);
       setShowAudioMenu(false);
       setTrackMenuPosition(null);
       if (videoRef) videoRef.pause();
-      await loadPlayback(movie.id, streamIndex, streamMode === 'hls' ? resumeTimeRef.current : 0);
+      await loadPlayback(movie.id, streamIndex, streamMode === 'hls' ? resumeTimeRef.current : 0, {
+        cacheBust: streamMode === 'hls',
+        requestId
+      });
     } catch (trackError) {
       console.error('Failed to switch audio track:', trackError);
       setVideoError({
@@ -936,9 +1026,13 @@ const Watch = () => {
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}
           onLoadedData={() => {
-            // Video data loaded - subtitles will be detected via other methods
+            tryResumePlayback('data loaded');
           }}
-          onPlay={() => setIsPlaying(true)}
+          onPlay={() => {
+            pendingAutoResumeRef.current = false;
+            shouldResumeRef.current = false;
+            setIsPlaying(true);
+          }}
           onPause={() => setIsPlaying(false)}
           onEnded={() => setIsPlaying(false)}
           onError={(e) => {
@@ -1004,11 +1098,13 @@ const Watch = () => {
             hlsRecoveryRef.current = { network: 0, media: 0, native: 0 };
             hlsReloadRef.current.count = 0;
             setVideoError(null);
+            tryResumePlayback('can play');
           }}
           onCanPlayThrough={() => {
             hlsRecoveryRef.current = { network: 0, media: 0, native: 0 };
             hlsReloadRef.current.count = 0;
             setVideoError(null);
+            tryResumePlayback('can play through');
           }}
           onProgress={() => {
             // Track buffering progress if needed in the future
