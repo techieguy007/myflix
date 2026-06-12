@@ -1,3 +1,5 @@
+process.env.MYFLIX_DISABLE_DEMO_SEED = process.env.MYFLIX_DISABLE_DEMO_SEED || 'true';
+
 const { runLibraryScan } = require('../lib/libraryScanner');
 
 runLibraryScan({ trigger: 'cli' })
