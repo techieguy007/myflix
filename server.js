@@ -50,18 +50,26 @@ app.use(cors({
   allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization']
 }));
 
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: process.env.NODE_ENV === 'production' ? 100 : 1000,
-  message: 'Too many requests from this IP, please try again later.',
-  standardHeaders: true,
-  legacyHeaders: false,
-  trustProxy: true
-});
+const isProduction = process.env.NODE_ENV === 'production';
+
+function createApiLimiter(maxProduction, maxDevelopment, message) {
+  return rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: isProduction ? maxProduction : maxDevelopment,
+    message: { error: message },
+    standardHeaders: true,
+    legacyHeaders: false,
+    trustProxy: true
+  });
+}
+
+const limiter = createApiLimiter(500, 3000, 'Too many requests from this IP, please try again later.');
+const libraryLimiter = createApiLimiter(3000, 10000, 'Too many library requests. Please wait a moment and try again.');
+const streamLimiter = createApiLimiter(20000, 50000, 'Too many streaming requests. Please wait a moment and try again.');
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: process.env.NODE_ENV === 'production' ? 20 : 200,
+  max: isProduction ? 20 : 200,
   message: { error: 'Too many login attempts, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -70,8 +78,8 @@ const authLimiter = rateLimit({
 
 app.use('/api/movies', limiter);
 app.use('/api/upload', limiter);
-app.use('/api/stream', limiter);
-app.use('/api/library', limiter);
+app.use('/api/stream', streamLimiter);
+app.use('/api/library', libraryLimiter);
 app.use('/api/auth', authLimiter);
 
 app.use(express.json({ limit: '10mb' }));
