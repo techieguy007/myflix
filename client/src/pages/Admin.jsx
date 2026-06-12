@@ -145,6 +145,30 @@ const SelectionControls = styled.div`
   border: 1px solid #333;
 `;
 
+const ManageFilterBar = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+`;
+
+const ManageFilterButton = styled.button.withConfig({
+  shouldForwardProp: (prop) => prop !== 'active'
+})`
+  border: 1px solid ${({ active, theme }) => active ? theme.colors.primary : '#444'};
+  background: ${({ active, theme }) => active ? theme.colors.primary : '#2a2a2a'};
+  color: white;
+  border-radius: 4px;
+  padding: 0.6rem 0.9rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: ${({ theme }) => theme.colors.primary};
+  }
+`;
+
 const SelectionButton = styled.button.withConfig({
   shouldForwardProp: (prop) => prop !== 'variant'
 })`
@@ -416,6 +440,58 @@ const conversionStatusStyle = (status) => {
   }
 };
 
+const isEpisode = (item) => item.media_type === 'episode';
+
+const formatRuntime = (seconds) => {
+  const value = Number(seconds || 0);
+  if (!Number.isFinite(value) || value <= 0) return null;
+
+  const minutes = Math.max(1, Math.round(value / 60));
+  if (minutes < 60) return `${minutes} min`;
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+};
+
+const formatEpisodeCode = (item) => {
+  if (!isEpisode(item)) return null;
+
+  const season = Number(item.season_number);
+  const episode = Number(item.episode_number);
+  if (!season || !episode) return 'Episode';
+
+  return `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
+};
+
+const buildPrimaryMeta = (item) => {
+  const parts = [];
+
+  if (isEpisode(item)) {
+    const episodeCode = formatEpisodeCode(item);
+    parts.push(`TV Episode${episodeCode ? ` ${episodeCode}` : ''}`);
+    if (item.series_title) parts.push(item.series_title);
+  } else {
+    parts.push('Movie');
+  }
+
+  if (item.genre) parts.push(item.genre);
+  if (item.release_year) parts.push(item.release_year);
+
+  return parts.join(' - ');
+};
+
+const buildSecondaryMeta = (item) => {
+  const parts = [];
+  const runtime = formatRuntime(item.duration);
+
+  if (runtime) parts.push(runtime);
+  if (item.rating) parts.push(`Rating ${item.rating}`);
+  if (item.imdb_rating) parts.push(`IMDb ${item.imdb_rating}`);
+
+  return parts.join(' - ');
+};
+
 const Admin = () => {
   const [activeTab, setActiveTab] = useState('scan');
   const [selectedFile, setSelectedFile] = useState(null);
@@ -427,6 +503,7 @@ const Admin = () => {
   const [scanResults, setScanResults] = useState(null);
   const [selectedMovies, setSelectedMovies] = useState([]);
   const [isSelecting, setIsSelecting] = useState(false);
+  const [manageFilter, setManageFilter] = useState('movies');
   const [conversionDialog, setConversionDialog] = useState(null);
   const [isConverting, setIsConverting] = useState(false);
   const [conversionProgress, setConversionProgress] = useState(null);
@@ -436,10 +513,21 @@ const Admin = () => {
   const { data: movies = [], isLoading: moviesLoading, refetch: refetchMovies } = useQuery({
     queryKey: ['admin-movies'],
     queryFn: async () => {
-      const response = await api.get('/api/movies');
+      const response = await api.get('/api/movies?limit=5000');
       return response.data.movies || [];
     }
   });
+
+  const movieItems = movies.filter((movie) => !isEpisode(movie));
+  const episodeItems = movies.filter((movie) => isEpisode(movie));
+  const visibleMovies = manageFilter === 'episodes'
+    ? episodeItems
+    : manageFilter === 'all'
+      ? movies
+      : movieItems;
+  const visibleMovieIds = visibleMovies.map((movie) => movie.id);
+  const visibleSelectedCount = selectedMovies.filter((id) => visibleMovieIds.includes(id)).length;
+  const allVisibleSelected = visibleMovies.length > 0 && visibleSelectedCount === visibleMovies.length;
 
   const {
     data: conversionData,
@@ -580,11 +668,17 @@ const Admin = () => {
   };
 
   const handleSelectAll = () => {
-    if (selectedMovies.length === movies.length) {
-      setSelectedMovies([]);
+    if (allVisibleSelected) {
+      setSelectedMovies((prev) => prev.filter((id) => !visibleMovieIds.includes(id)));
     } else {
-      setSelectedMovies(movies.map(movie => movie.id));
+      setSelectedMovies((prev) => Array.from(new Set([...prev, ...visibleMovieIds])));
     }
+  };
+
+  const handleManageFilterChange = (filter) => {
+    setManageFilter(filter);
+    setSelectedMovies([]);
+    setIsSelecting(false);
   };
 
   const handleDeleteSelected = () => {
@@ -1068,10 +1162,10 @@ const Admin = () => {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem' }}>
               <h2 style={{ color: 'white', fontSize: '1.5rem', margin: 0 }}>
-                Manage Movies ({movies.length})
+                Manage Library ({visibleMovies.length})
                 {isSelecting && selectedMovies.length > 0 && (
                   <span style={{ color: '#e50914', fontSize: '1rem', marginLeft: '0.5rem' }}>
-                    - {selectedMovies.length} selected
+                    - {visibleSelectedCount} selected
                   </span>
                 )}
               </h2>
@@ -1095,15 +1189,36 @@ const Admin = () => {
               </div>
             </div>
 
+            <ManageFilterBar>
+              <ManageFilterButton
+                active={manageFilter === 'movies'}
+                onClick={() => handleManageFilterChange('movies')}
+              >
+                Movies ({movieItems.length})
+              </ManageFilterButton>
+              <ManageFilterButton
+                active={manageFilter === 'episodes'}
+                onClick={() => handleManageFilterChange('episodes')}
+              >
+                Episodes ({episodeItems.length})
+              </ManageFilterButton>
+              <ManageFilterButton
+                active={manageFilter === 'all'}
+                onClick={() => handleManageFilterChange('all')}
+              >
+                All ({movies.length})
+              </ManageFilterButton>
+            </ManageFilterBar>
+
             {isSelecting && (
               <SelectionControls>
                 <SelectionButton onClick={handleSelectAll}>
-                  {selectedMovies.length === movies.length ? <FiSquare /> : <FiCheckSquare />}
-                  {selectedMovies.length === movies.length ? 'Deselect All' : 'Select All'}
+                  {allVisibleSelected ? <FiSquare /> : <FiCheckSquare />}
+                  {allVisibleSelected ? 'Deselect All' : 'Select All'}
                 </SelectionButton>
                 
                 <span style={{ color: '#b3b3b3', fontSize: '0.9rem' }}>
-                  {selectedMovies.length} of {movies.length} selected
+                  {visibleSelectedCount} of {visibleMovies.length} selected
                 </span>
                 
                 <div style={{ marginLeft: 'auto' }}>
@@ -1122,13 +1237,13 @@ const Admin = () => {
               <div style={{ textAlign: 'center', padding: '2rem' }}>
                 <LoadingSpinner />
               </div>
-            ) : movies.length === 0 ? (
+            ) : visibleMovies.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '3rem', color: '#999' }}>
-                No movies uploaded yet. Upload some movies to get started!
+                No items found in this view.
               </div>
             ) : (
               <MovieGrid>
-                {movies.map((movie) => (
+                {visibleMovies.map((movie) => (
                   <MovieCard
                     key={movie.id}
                     initial={{ opacity: 0, y: 20 }}
@@ -1158,8 +1273,10 @@ const Admin = () => {
                     </MovieImage>
                     <MovieInfo>
                       <MovieTitle>{movie.title}</MovieTitle>
-                      <MovieMeta>{movie.genre} • {movie.release_year}</MovieMeta>
-                      <MovieMeta>{movie.duration} min • {movie.rating}</MovieMeta>
+                      <MovieMeta>{buildPrimaryMeta(movie)}</MovieMeta>
+                      {buildSecondaryMeta(movie) && (
+                        <MovieMeta>{buildSecondaryMeta(movie)}</MovieMeta>
+                      )}
                       
                       {!isSelecting && (
                         <MovieActions>
