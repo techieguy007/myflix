@@ -50,11 +50,16 @@ function groupEpisodes(episodes) {
       seriesMap.set(seriesTitle, {
         title: seriesTitle,
         seasons: new Map(),
-        episodeCount: 0
+        episodeCount: 0,
+        ratedCounts: new Map()
       });
     }
 
     const series = seriesMap.get(seriesTitle);
+    const rated = String(episode.rated || '').trim();
+    if (rated && rated.toUpperCase() !== 'N/A') {
+      series.ratedCounts.set(rated, (series.ratedCounts.get(rated) || 0) + 1);
+    }
     const seasonNumber = episode.season_number || 1;
     if (!series.seasons.has(seasonNumber)) {
       series.seasons.set(seasonNumber, {
@@ -68,15 +73,22 @@ function groupEpisodes(episodes) {
   });
 
   return Array.from(seriesMap.values())
-    .map((series) => ({
-      ...series,
-      seasons: Array.from(series.seasons.values())
-        .map((season) => ({
-          ...season,
-          episodes: season.episodes.sort((a, b) => (a.episode_number || 0) - (b.episode_number || 0))
-        }))
-        .sort((a, b) => a.seasonNumber - b.seasonNumber)
-    }))
+    .map((series) => {
+      const rated = Array.from(series.ratedCounts.entries())
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] || null;
+
+      return {
+        title: series.title,
+        rated,
+        episodeCount: series.episodeCount,
+        seasons: Array.from(series.seasons.values())
+          .map((season) => ({
+            ...season,
+            episodes: season.episodes.sort((a, b) => (a.episode_number || 0) - (b.episode_number || 0))
+          }))
+          .sort((a, b) => a.seasonNumber - b.seasonNumber)
+      };
+    })
     .sort((a, b) => a.title.localeCompare(b.title));
 }
 

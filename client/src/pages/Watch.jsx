@@ -196,9 +196,27 @@ const MovieTitle = styled.h1`
 
 const MovieMeta = styled.div`
   display: flex;
-  gap: 2rem;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem 2rem;
   margin-bottom: 1rem;
   color: ${({ theme }) => theme.colors.textSecondary};
+`;
+
+const ContentRatingBadge = styled.span`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 3px;
+  color: ${({ theme }) => theme.colors.text};
+  background: rgba(255, 255, 255, 0.14);
+  padding: 0.12rem 0.44rem;
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: 0;
 `;
 
 const SeriesNavigation = styled.div`
@@ -1354,6 +1372,7 @@ const Watch = () => {
           {movie.media_type === 'episode' && movie.series_title && <span>{movie.series_title}</span>}
           {movie.release_year && <span>{movie.release_year}</span>}
           {movie.genre && <span>{movie.genre}</span>}
+          {movie.rated && <ContentRatingBadge>{movie.rated}</ContentRatingBadge>}
           {movie.duration && <span>{Math.floor(movie.duration / 60)} min</span>}
           {movie.rating && <span>⭐ {movie.rating}/10</span>}
         </MovieMeta>

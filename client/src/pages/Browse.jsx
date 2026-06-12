@@ -143,6 +143,13 @@ const SeriesTitle = styled.h3`
   margin: 1.5rem 0 0.75rem;
 `;
 
+const SeriesTitleRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+`;
+
 const SeriesHeader = styled.div`
   display: flex;
   align-items: flex-end;
@@ -284,6 +291,23 @@ const MediaMeta = styled.p`
   margin-bottom: 0.5rem;
 `;
 
+const ContentRatingBadge = styled.span`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  min-width: 2.4rem;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 3px;
+  color: ${({ theme }) => theme.colors.text};
+  background: rgba(255, 255, 255, 0.16);
+  padding: 0.12rem 0.42rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: 0;
+`;
+
 const EmptyState = styled.div`
   text-align: center;
   padding: 4rem 2rem;
@@ -334,18 +358,7 @@ function MediaCard({ item, index, cardVariants, navigate, episode = false }) {
             IMDb {item.imdb_rating}/10
           </MediaMeta>
         )}
-        {item.rated && (
-          <MediaMeta style={{
-            display: 'inline-block',
-            background: 'rgba(255,255,255,0.2)',
-            padding: '0.2rem 0.4rem',
-            borderRadius: '3px',
-            fontSize: '0.8rem',
-            marginTop: '0.5rem'
-          }}>
-            {item.rated}
-          </MediaMeta>
-        )}
+        {item.rated && <ContentRatingBadge>{item.rated}</ContentRatingBadge>}
       </MediaInfo>
     </MediaCardShell>
   );
@@ -601,7 +614,10 @@ const Browse = () => {
                     <div key={show.title}>
                       <SeriesHeader>
                         <div>
-                          <SeriesTitle>{show.title}</SeriesTitle>
+                          <SeriesTitleRow>
+                            <SeriesTitle>{show.title}</SeriesTitle>
+                            {show.rated && <ContentRatingBadge>{show.rated}</ContentRatingBadge>}
+                          </SeriesTitleRow>
                           <SeriesSummary>
                             {show.episodeCount || 0} episodes across {(show.seasons || []).length} season{(show.seasons || []).length === 1 ? '' : 's'}
                           </SeriesSummary>
