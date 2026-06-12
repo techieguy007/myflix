@@ -4,6 +4,13 @@ const path = require('path');
 const db = require('../database/init');
 const { optionalAuth } = require('../middleware/auth');
 const jwt = require('jsonwebtoken');
+const {
+  ensureHlsTranscode,
+  getPlaybackProfile,
+  hlsAssetPath,
+  hlsContentType,
+  waitForFile
+} = require('../lib/transcoder');
 
 // MIME type mapping for video formats
 const getMimeType = (filePath) => {
@@ -63,6 +70,85 @@ router.get('/test', (req, res) => {
     message: 'Streaming service is running',
     timestamp: new Date().toISOString()
   });
+});
+
+function tokenQuery(req) {
+  return req.query.token ? `?token=${encodeURIComponent(req.query.token)}` : '';
+}
+
+async function getStreamMovie(movieId) {
+  const movie = await db.get('SELECT id, video_path, title, file_size FROM movies WHERE id = ?', [movieId]);
+
+  if (!movie) {
+    const error = new Error('Movie not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (!movie.video_path || !fs.existsSync(movie.video_path)) {
+    const error = new Error('Video file not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return movie;
+}
+
+// Tell the client whether to direct-play or use browser-compatible HLS.
+router.get('/:id/playback', streamAuth, async (req, res) => {
+  try {
+    const movie = await getStreamMovie(req.params.id);
+    const profile = await getPlaybackProfile(movie);
+    const query = tokenQuery(req);
+
+    res.json({
+      id: movie.id,
+      title: movie.title,
+      streamMode: profile.streamMode,
+      directUrl: `/api/stream/${movie.id}${query}`,
+      hlsUrl: `/api/stream/${movie.id}/hls/index.m3u8${query}`,
+      compatibility: profile
+    });
+  } catch (error) {
+    console.error('Playback profile error:', error);
+    res.status(error.statusCode || 500).json({ error: error.message || 'Playback profile error' });
+  }
+});
+
+// Generate and serve HLS playlists/segments for browser-incompatible files.
+router.get('/:id/hls/:file', streamAuth, async (req, res) => {
+  try {
+    const movie = await getStreamMovie(req.params.id);
+    const fileName = req.params.file;
+    const assetPath = hlsAssetPath(movie.id, movie.video_path, fileName);
+
+    if (!assetPath) {
+      return res.status(400).json({ error: 'Invalid HLS asset path' });
+    }
+
+    if (fileName === 'index.m3u8') {
+      const job = ensureHlsTranscode(movie);
+      const ready = job.ready || await waitForFile(job.manifestPath, 25000);
+      if (!ready) {
+        return res.status(503).json({ error: 'Transcode is still starting. Retry in a few seconds.' });
+      }
+    }
+
+    if (!fs.existsSync(assetPath)) {
+      return res.status(404).json({ error: 'HLS asset not ready' });
+    }
+
+    res.set({
+      'Content-Type': hlsContentType(fileName),
+      'Cache-Control': fileName.endsWith('.m3u8') ? 'no-cache' : 'public, max-age=3600',
+      'Cross-Origin-Resource-Policy': 'cross-origin'
+    });
+
+    return res.sendFile(assetPath);
+  } catch (error) {
+    console.error('HLS streaming error:', error);
+    return res.status(error.statusCode || 500).json({ error: error.message || 'HLS streaming error' });
+  }
 });
 
 // Stream video file with range requests support
@@ -363,4 +449,4 @@ router.get('/:id/subtitle:ext', async (req, res) => {
   }
 });
 
-module.exports = router; 
+module.exports = router;

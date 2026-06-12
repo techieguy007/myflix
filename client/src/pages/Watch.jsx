@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
 import { FiArrowLeft, FiPlay, FiPause, FiMaximize2, FiType } from 'react-icons/fi';
+import Hls from 'hls.js';
 import api from '../utils/api';
 import LoadingSpinner from '../components/LoadingSpinner';
 
@@ -240,6 +241,8 @@ const Watch = () => {
   const [showSubtitleMenu, setShowSubtitleMenu] = useState(false);
   const [videoError, setVideoError] = useState(null);
   const [videoSrc, setVideoSrc] = useState('');
+  const [streamMode, setStreamMode] = useState('direct');
+  const [playbackInfo, setPlaybackInfo] = useState(null);
 
   useEffect(() => {
     fetchMovie();
@@ -282,9 +285,67 @@ const Watch = () => {
     return () => document.removeEventListener('click', handleClickOutside);
   }, [showSubtitleMenu]);
 
+  useEffect(() => {
+    if (!videoRef || !videoSrc || streamMode !== 'hls') {
+      return undefined;
+    }
+
+    if (videoRef.canPlayType('application/vnd.apple.mpegurl')) {
+      videoRef.src = videoSrc;
+      videoRef.load();
+      return undefined;
+    }
+
+    if (!Hls.isSupported()) {
+      setVideoError({
+        message: 'Browser-compatible stream not supported',
+        details: 'This browser cannot play HLS streams. Try Chrome, Edge, or another modern browser.'
+      });
+      return undefined;
+    }
+
+    const hls = new Hls({
+      enableWorker: true,
+      lowLatencyMode: false,
+      maxBufferLength: 60,
+      backBufferLength: 30
+    });
+
+    hls.loadSource(videoSrc);
+    hls.attachMedia(videoRef);
+    hls.on(Hls.Events.ERROR, (event, data) => {
+      if (!data.fatal) {
+        return;
+      }
+
+      if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+        hls.startLoad();
+        return;
+      }
+
+      if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+        hls.recoverMediaError();
+        return;
+      }
+
+      setVideoError({
+        message: 'Browser-compatible stream failed',
+        details: data.details || 'The transcoded stream could not be played.'
+      });
+      hls.destroy();
+    });
+
+    return () => {
+      hls.destroy();
+    };
+  }, [videoRef, videoSrc, streamMode]);
+
   const fetchMovie = async () => {
     try {
       setLoading(true);
+      setVideoError(null);
+      setPlaybackInfo(null);
+      setStreamMode('direct');
       const [movieResponse, subtitleResponse] = await Promise.allSettled([
         api.get(`/api/movies/${id}`),
         api.get(`/api/movies/${id}/subtitles`)
@@ -292,12 +353,24 @@ const Watch = () => {
 
       if (movieResponse.status === 'fulfilled') {
         setMovie(movieResponse.value.data);
-        
-        // Set video source
+
         const baseUrl = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5000';
         const token = localStorage.getItem('authToken');
-        const videoUrl = `${baseUrl}/api/stream/${movieResponse.value.data.id}${token ? `?token=${token}` : ''}`;
-        setVideoSrc(videoUrl);
+        const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+
+        try {
+          const playbackResponse = await api.get(`/api/stream/${movieResponse.value.data.id}/playback${tokenParam}`);
+          const playback = playbackResponse.data;
+          setPlaybackInfo(playback);
+          setStreamMode(playback.streamMode || 'direct');
+          const sourcePath = playback.streamMode === 'hls' ? playback.hlsUrl : playback.directUrl;
+          setVideoSrc(sourcePath.startsWith('http') ? sourcePath : `${baseUrl}${sourcePath}`);
+        } catch (playbackError) {
+          console.warn('Playback profile failed; falling back to direct stream:', playbackError);
+          setPlaybackInfo(null);
+          setStreamMode('direct');
+          setVideoSrc(`${baseUrl}/api/stream/${movieResponse.value.data.id}${tokenParam}`);
+        }
       } else {
         throw new Error('Failed to fetch movie');
       }
@@ -456,6 +529,7 @@ const Watch = () => {
   }
 
   const progress = duration ? (currentTime / duration) * 100 : 0;
+  const videoElementSrc = streamMode === 'hls' && Hls.isSupported() ? undefined : videoSrc;
 
   return (
     <Container onMouseMove={handleMouseMove}>
@@ -512,7 +586,7 @@ const Watch = () => {
         
         <Video
           ref={setVideoRef}
-          src={videoSrc}
+          src={videoElementSrc}
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}
           onLoadedData={() => {
@@ -546,11 +620,15 @@ const Watch = () => {
                   break;
                 case e.target.error.MEDIA_ERR_DECODE:
                   errorMessage = 'Video format not supported or corrupted';
-                  errorDetails = 'The video file may be corrupted or use an unsupported codec. Try converting to MP4 format.';
+                  errorDetails = streamMode === 'hls'
+                    ? 'The browser-compatible stream could not be decoded.'
+                    : 'The original file may use an unsupported codec. MyFlix will use browser-compatible streaming when available.';
                   break;
                 case e.target.error.MEDIA_ERR_SRC_NOT_SUPPORTED:
                   errorMessage = 'Video source not supported';
-                  errorDetails = 'This video format is not supported by your browser. Try converting to MP4 with H.264 codec.';
+                  errorDetails = streamMode === 'hls'
+                    ? 'The browser-compatible stream could not be loaded yet. Retry in a few seconds.'
+                    : 'This original file is not supported by your browser.';
                   break;
                 default:
                   errorMessage = 'Unknown video error';
@@ -656,6 +734,17 @@ const Watch = () => {
         </MovieMeta>
         {movie.description && (
           <MovieDescription>{movie.description}</MovieDescription>
+        )}
+        {playbackInfo && playbackInfo.streamMode === 'hls' && (
+          <MovieMeta>
+            <span><strong>Playback:</strong> Browser-compatible stream</span>
+            {playbackInfo.compatibility?.videoCodec && (
+              <span><strong>Original video:</strong> {playbackInfo.compatibility.videoCodec}</span>
+            )}
+            {playbackInfo.compatibility?.audioCodec && (
+              <span><strong>Original audio:</strong> {playbackInfo.compatibility.audioCodec}</span>
+            )}
+          </MovieMeta>
         )}
         {movie.director && (
           <MovieMeta>

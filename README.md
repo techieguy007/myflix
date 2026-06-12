@@ -74,6 +74,16 @@ Movies/<Movie Name> (2024)/<Movie Name> (2024).mkv
 
 By default MyFlix only stores these clean target names as suggestions in SQLite. It does not rename or move your files unless `media.renameMode` is changed to `apply`.
 
+## Browser Playback Compatibility
+
+Browsers cannot directly play many local-library formats such as MKV, HEVC/x265, EAC3, AVI, or WMV. MyFlix checks the source container/codecs with `ffprobe` before playback:
+
+- Browser-compatible MP4/WebM files are streamed directly.
+- Incompatible files are transcoded on demand to HLS using `ffmpeg`.
+- HLS output is cached locally under `transcodes/` and ignored by Git.
+
+Install `ffmpeg` and `ffprobe` on the server machine for this fallback to work. The Windows service uses the system PATH, or you can set `FFMPEG_PATH` and `FFPROBE_PATH` environment variables.
+
 ## Run At Windows Logon
 
 Install dependencies before registering the startup task:
