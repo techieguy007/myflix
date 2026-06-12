@@ -27,7 +27,10 @@
     "ffmpegPreset": "ultrafast",
     "realtime": true,
     "prepareOnStartup": false,
-    "preparedMaxStartupJobs": 0
+    "preparedMaxStartupJobs": 0,
+    "deleteOriginalAfterPrepare": true,
+    "deleteOriginalWithMultipleAudio": false,
+    "deleteOriginalWithEmbeddedSubtitles": false
   },
   "service": {
     "nodeExe": "C:\\Program Files\\nodejs\\node.exe",

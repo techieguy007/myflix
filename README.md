@@ -93,6 +93,7 @@ Browsers cannot directly play many local-library formats such as MKV, HEVC/x265,
 - Incompatible files, or files with multiple audio tracks, are prepared once into cached MP4 files under `transcodes`.
 - Prepared MP4s use H.264/AAC in an MP4 container, with H.264 video remuxed/copied when possible.
 - Playback uses the prepared MP4 direct stream when it exists.
+- If original deletion is enabled, the prepared MP4 is promoted into the movie folder and becomes the tracked library file.
 - HLS remains only as a fallback while a prepared MP4 is still being created.
 - Files with multiple audio tracks expose an audio selector in the player; changing audio uses a prepared MP4 for that selected track when available.
 - Embedded text subtitles are exposed in the subtitle selector and converted to cached WebVTT when selected.
@@ -110,11 +111,16 @@ The Windows service passes these transcoding settings from `config/myflix.config
   "ffmpegPreset": "ultrafast",
   "realtime": true,
   "prepareOnStartup": false,
-  "preparedMaxStartupJobs": 0
+  "preparedMaxStartupJobs": 0,
+  "deleteOriginalAfterPrepare": true,
+  "deleteOriginalWithMultipleAudio": false,
+  "deleteOriginalWithEmbeddedSubtitles": false
 }
 ```
 
 Use `ffmpegThreads: 1` for the lowest CPU usage. `realtime: true` only applies to fallback HLS. Prepared MP4 jobs run one at a time. By default, MyFlix prepares an incompatible file the first time you play it, then streams the cached MP4 directly after that. Set `prepareOnStartup: true` when you want to pre-warm the library in the background; `preparedMaxStartupJobs: 0` means no cap, so use a small number if you do not want login-time CPU spikes.
+
+When `deleteOriginalAfterPrepare` is enabled, a successfully prepared MP4 is copied next to the original file, the database is updated to point at that MP4, and then the old source file is deleted with retries. MyFlix does not delete originals with multiple audio tracks or extractable embedded text subtitles unless you explicitly enable the matching override, so alternate audio/subtitle choices are not silently lost.
 
 ## Run At Windows Logon
 
