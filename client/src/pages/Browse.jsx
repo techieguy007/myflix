@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
 import { motion } from 'framer-motion';
-import { FiPlay, FiInfo } from 'react-icons/fi';
+import { FiPlay, FiInfo, FiRefreshCw } from 'react-icons/fi';
+import toast from 'react-hot-toast';
 import api from '../utils/api';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { useAuth } from '../contexts/AuthContext';
 
 const Container = styled.div`
   min-height: 100vh;
@@ -92,6 +94,23 @@ const Button = styled(motion.button)`
     color: white;
     border: 1px solid rgba(255, 255, 255, 0.3);
   }
+
+  &.accent {
+    background: ${({ theme }) => theme.colors.primary};
+    color: white;
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.65;
+  }
+`;
+
+const ScanStatus = styled.p`
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.9rem;
+  margin-top: 0.85rem;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.75);
 `;
 
 const Content = styled.div`
@@ -265,9 +284,13 @@ function MediaCard({ item, index, cardVariants, navigate, episode = false }) {
 
 const Browse = () => {
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const [movies, setMovies] = useState([]);
   const [series, setSeries] = useState([]);
   const [counts, setCounts] = useState({ movies: 0, series: 0, episodes: 0, total: 0 });
+  const [scanState, setScanState] = useState(null);
+  const [scanResult, setScanResult] = useState(null);
+  const [manualScanRunning, setManualScanRunning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -275,20 +298,84 @@ const Browse = () => {
     fetchLibrary();
   }, []);
 
-  const fetchLibrary = async () => {
+  const fetchLibrary = async ({ quiet = false } = {}) => {
     try {
-      setLoading(true);
+      if (!quiet) setLoading(true);
       const response = await api.get('/api/library');
       setMovies(response.data.movies || []);
       setSeries(response.data.series || []);
       setCounts(response.data.counts || { movies: 0, series: 0, episodes: 0, total: 0 });
+      setScanState(response.data.scan || null);
     } catch (err) {
       console.error('Failed to fetch library:', err);
       setError('Failed to load library');
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
   };
+
+  const scanSummary = (result) => {
+    if (!result) return '';
+    if (result.alreadyRunning) return 'Library scan is already running.';
+
+    const scanned = result.scanned ?? 0;
+    const added = result.added ?? 0;
+    const updated = result.updated ?? 0;
+    const removed = result.removed ?? 0;
+    return `Last scan: ${scanned} scanned, ${added} added, ${updated} updated, ${removed} removed.`;
+  };
+
+  const handleManualRescan = async () => {
+    if (manualScanRunning || scanState?.running) return;
+
+    setManualScanRunning(true);
+    setScanResult(null);
+    toast.loading('Rebuilding library index...', { id: 'library-rescan' });
+
+    try {
+      const response = await api.post('/api/library/scan/rebuild', {}, { timeout: 10 * 60 * 1000 });
+      const result = response.data || {};
+      setScanResult(result);
+      setScanState({ running: false, lastResult: result });
+
+      if (result.alreadyRunning) {
+        toast('Library scan is already running.', { id: 'library-rescan' });
+      } else {
+        toast.success(`Scan complete: ${result.scanned || 0} items checked.`, { id: 'library-rescan' });
+      }
+
+      await fetchLibrary({ quiet: true });
+    } catch (err) {
+      console.error('Manual library scan failed:', err);
+      const message = err.response?.data?.error || 'Library rescan failed';
+      toast.error(message, { id: 'library-rescan' });
+    } finally {
+      setManualScanRunning(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isAdmin || !scanState?.running) {
+      return undefined;
+    }
+
+    const interval = setInterval(async () => {
+      try {
+        const response = await api.get('/api/library/scan/status', { timeout: 15000 });
+        const nextScanState = response.data || null;
+        setScanState(nextScanState);
+
+        if (nextScanState && !nextScanState.running) {
+          setScanResult(nextScanState.lastResult || null);
+          await fetchLibrary({ quiet: true });
+        }
+      } catch (err) {
+        console.warn('Failed to refresh scan status:', err);
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [isAdmin, scanState?.running]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const heroVariants = {
     initial: { opacity: 0, y: 50 },
@@ -301,6 +388,9 @@ const Browse = () => {
     animate: { opacity: 1, scale: 1 },
     transition: { duration: 0.3 }
   };
+
+  const isScanning = manualScanRunning || scanState?.running;
+  const visibleScanResult = scanResult || scanState?.lastResult;
 
   if (loading) {
     return <LoadingSpinner fullScreen text="Loading library..." />;
@@ -328,7 +418,24 @@ const Browse = () => {
               <FiInfo />
               {counts.total || 0} indexed items
             </Button>
+            {isAdmin && (
+              <Button
+                className="accent"
+                disabled={isScanning}
+                onClick={handleManualRescan}
+                whileHover={isScanning ? {} : { scale: 1.05 }}
+                whileTap={isScanning ? {} : { scale: 0.95 }}
+              >
+                <FiRefreshCw />
+                {isScanning ? 'Scanning...' : 'Rescan Library'}
+              </Button>
+            )}
           </ButtonGroup>
+          {(isScanning || visibleScanResult) && (
+            <ScanStatus>
+              {isScanning ? 'Scanning media folder now...' : scanSummary(visibleScanResult)}
+            </ScanStatus>
+          )}
         </HeroContent>
       </Hero>
 
@@ -342,7 +449,7 @@ const Browse = () => {
           <EmptyState>
             <EmptyTitle>No Media Yet</EmptyTitle>
             <EmptyDescription>
-              MyFlix scans your configured media folder on startup. You can also rebuild the index from the admin panel.
+              MyFlix scans your configured media folder on startup. Admin users can rebuild the index from this page.
             </EmptyDescription>
           </EmptyState>
         ) : (
