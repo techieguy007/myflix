@@ -43,6 +43,7 @@ const isBrowserCompatible = (filePath) => {
 };
 
 const router = express.Router();
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';
 
 // Custom auth middleware for video streaming (supports query token)
 const streamAuth = async (req, res, next) => {
@@ -55,7 +56,7 @@ const streamAuth = async (req, res, next) => {
   
   if (token) {
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+      const decoded = jwt.verify(token, JWT_SECRET);
       req.user = decoded;
     } catch (error) {
       // Invalid token, but continue without auth (optional auth)
@@ -184,6 +185,19 @@ router.get('/:id/hls/:variant/:file', streamAuth, async (req, res) => {
           transcodeRunning: job.running
         });
         return res.status(503).json({ error: 'Transcode is still starting. Retry in a few seconds.' });
+      }
+    }
+
+    if (!fs.existsSync(assetPath)) {
+      const ready = isManifest ? false : await waitForFile(assetPath, 15000);
+      if (ready) {
+        logger.info('stream.hls_asset_became_ready', {
+          requestId: req.requestId,
+          movieId: movie.id,
+          variant,
+          fileName,
+          assetPath
+        });
       }
     }
 

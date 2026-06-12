@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
 import { FiArrowLeft, FiPlay, FiPause, FiMaximize2, FiType, FiVolume2 } from 'react-icons/fi';
@@ -258,6 +258,10 @@ const Watch = () => {
   const [videoSrc, setVideoSrc] = useState('');
   const [streamMode, setStreamMode] = useState('direct');
   const [playbackInfo, setPlaybackInfo] = useState(null);
+  const hlsRef = useRef(null);
+  const hlsRecoveryRef = useRef({ network: 0, media: 0, native: 0 });
+  const hlsRetryTimerRef = useRef(null);
+  const currentTimeRef = useRef(0);
 
   useEffect(() => {
     fetchMovie();
@@ -297,6 +301,50 @@ const Watch = () => {
     return () => window.removeEventListener('resize', closeTrackMenus);
   }, []);
 
+  useEffect(() => () => {
+    if (hlsRetryTimerRef.current) {
+      clearTimeout(hlsRetryTimerRef.current);
+      hlsRetryTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleHlsRecovery = useCallback((reason, retryPlayback = false) => {
+    if (!videoRef || streamMode !== 'hls') {
+      return false;
+    }
+
+    const hls = hlsRef.current;
+    if (!hls) {
+      return false;
+    }
+
+    const resumeAt = Number.isFinite(videoRef.currentTime) ? videoRef.currentTime : currentTimeRef.current;
+    setVideoError(null);
+    console.warn(`Recovering HLS playback after ${reason}`, { resumeAt, retryPlayback });
+
+    if (hlsRetryTimerRef.current) {
+      clearTimeout(hlsRetryTimerRef.current);
+    }
+
+    hlsRetryTimerRef.current = setTimeout(() => {
+      try {
+        hls.startLoad(Math.max(0, resumeAt - 2));
+        if (Number.isFinite(resumeAt) && resumeAt > 0 && Math.abs(videoRef.currentTime - resumeAt) > 1) {
+          videoRef.currentTime = resumeAt;
+        }
+        if (retryPlayback) {
+          videoRef.play().catch((error) => {
+            console.warn('HLS recovery play retry was blocked:', error);
+          });
+        }
+      } catch (error) {
+        console.warn('HLS recovery failed:', error);
+      }
+    }, 800);
+
+    return true;
+  }, [videoRef, streamMode]);
+
   useEffect(() => {
     if (!videoRef || !videoSrc || streamMode !== 'hls') {
       return undefined;
@@ -320,23 +368,63 @@ const Watch = () => {
       enableWorker: true,
       lowLatencyMode: false,
       maxBufferLength: 60,
-      backBufferLength: 30
+      backBufferLength: 30,
+      manifestLoadingMaxRetry: 12,
+      manifestLoadingRetryDelay: 1000,
+      manifestLoadingMaxRetryTimeout: 12000,
+      levelLoadingMaxRetry: 12,
+      levelLoadingRetryDelay: 1000,
+      levelLoadingMaxRetryTimeout: 12000,
+      fragLoadingMaxRetry: 12,
+      fragLoadingRetryDelay: 1000,
+      fragLoadingMaxRetryTimeout: 12000
     });
 
+    hlsRef.current = hls;
+    hlsRecoveryRef.current = { network: 0, media: 0, native: 0 };
     hls.loadSource(videoSrc);
     hls.attachMedia(videoRef);
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      hlsRecoveryRef.current = { network: 0, media: 0, native: 0 };
+      setVideoError(null);
+    });
     hls.on(Hls.Events.ERROR, (event, data) => {
       if (!data.fatal) {
         return;
       }
 
       if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-        hls.startLoad();
+        hlsRecoveryRef.current.network += 1;
+        if (hlsRecoveryRef.current.network <= 12) {
+          scheduleHlsRecovery(data.details || 'network error', !videoRef.paused);
+          return;
+        }
+        setVideoError({
+          message: 'Browser-compatible stream failed',
+          details: 'The transcoded stream could not be loaded after several retries.'
+        });
+        if (hlsRef.current === hls) {
+          hlsRef.current = null;
+        }
+        hls.destroy();
         return;
       }
 
       if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-        hls.recoverMediaError();
+        hlsRecoveryRef.current.media += 1;
+        if (hlsRecoveryRef.current.media <= 4) {
+          hls.recoverMediaError();
+          scheduleHlsRecovery(data.details || 'media error', !videoRef.paused);
+          return;
+        }
+        setVideoError({
+          message: 'Browser-compatible stream failed',
+          details: data.details || 'The transcoded stream could not be played.'
+        });
+        if (hlsRef.current === hls) {
+          hlsRef.current = null;
+        }
+        hls.destroy();
         return;
       }
 
@@ -344,13 +432,23 @@ const Watch = () => {
         message: 'Browser-compatible stream failed',
         details: data.details || 'The transcoded stream could not be played.'
       });
+      if (hlsRef.current === hls) {
+        hlsRef.current = null;
+      }
       hls.destroy();
     });
 
     return () => {
+      if (hlsRetryTimerRef.current) {
+        clearTimeout(hlsRetryTimerRef.current);
+        hlsRetryTimerRef.current = null;
+      }
+      if (hlsRef.current === hls) {
+        hlsRef.current = null;
+      }
       hls.destroy();
     };
-  }, [videoRef, videoSrc, streamMode]);
+  }, [videoRef, videoSrc, streamMode, scheduleHlsRecovery]);
 
   const baseUrl = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5000';
 
@@ -448,12 +546,23 @@ const Watch = () => {
     if (isPlaying) {
       videoRef.pause();
     } else {
-      videoRef.play();
+      setVideoError(null);
+      videoRef.play().catch((error) => {
+        console.warn('Unable to start playback:', error);
+        if (streamMode === 'hls' && Hls.isSupported() && scheduleHlsRecovery('play request failed', true)) {
+          return;
+        }
+        setVideoError({
+          message: 'Playback could not start',
+          details: error.message || 'The browser blocked or failed the play request.'
+        });
+      });
     }
   };
 
   const handleTimeUpdate = () => {
     if (videoRef) {
+      currentTimeRef.current = videoRef.currentTime;
       setCurrentTime(videoRef.currentTime);
     }
   };
@@ -615,7 +724,9 @@ const Watch = () => {
              <button 
                onClick={() => {
                  setVideoError(null);
-                 // Retry loading the video
+                 if (streamMode === 'hls' && Hls.isSupported() && scheduleHlsRecovery('manual retry', true)) {
+                   return;
+                 }
                  if (videoRef) {
                    videoRef.load();
                  }
@@ -657,6 +768,19 @@ const Watch = () => {
             console.error('Video error details:', errorDetails);
             
             if (e.target.error) {
+              if (streamMode === 'hls' && Hls.isSupported()) {
+                hlsRecoveryRef.current.native += 1;
+                if (hlsRecoveryRef.current.native <= 8) {
+                  const recovered = scheduleHlsRecovery(
+                    `native video error ${e.target.error.code}`,
+                    !e.target.paused || isPlaying
+                  );
+                  if (recovered) {
+                    return;
+                  }
+                }
+              }
+
               let errorMessage = 'Video playback error';
               let errorDetails = '';
               
@@ -693,10 +817,12 @@ const Watch = () => {
             setVideoError(null); // Clear any previous errors
           }}
           onCanPlay={() => {
-            // Video can start playing
+            hlsRecoveryRef.current = { network: 0, media: 0, native: 0 };
+            setVideoError(null);
           }}
           onCanPlayThrough={() => {
-            // Video can play through without buffering
+            hlsRecoveryRef.current = { network: 0, media: 0, native: 0 };
+            setVideoError(null);
           }}
           onProgress={() => {
             // Track buffering progress if needed in the future
