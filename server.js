@@ -14,6 +14,7 @@ const movieRoutes = require('./routes/movies');
 const streamRoutes = require('./routes/stream');
 const uploadRoutes = require('./routes/upload');
 const libraryRoutes = require('./routes/library');
+const subtitleRoutes = require('./routes/subtitles');
 
 const db = require('./database/init');
 const { loadConfig } = require('./lib/config');
@@ -90,6 +91,7 @@ const authLimiter = rateLimit({
 app.use('/api/movies', limiter);
 app.use('/api/upload', limiter);
 app.use('/api/stream', streamLimiter);
+app.use('/api/subtitles', libraryLimiter);
 app.use('/api/library', libraryLimiter);
 app.use('/api/auth', authLimiter);
 
@@ -121,6 +123,7 @@ app.use('/movies', express.static(path.join(__dirname, 'movies')));
 app.use('/api/auth', authRoutes);
 app.use('/api/movies', movieRoutes);
 app.use('/api/stream', streamRoutes);
+app.use('/api/subtitles', subtitleRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/library', libraryRoutes);
 

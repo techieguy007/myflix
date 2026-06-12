@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
-import { FiArrowLeft, FiPlay, FiPause, FiMaximize2, FiType, FiVolume2 } from 'react-icons/fi';
+import { FiArrowLeft, FiDownload, FiPlay, FiPause, FiMaximize2, FiSearch, FiType, FiVolume2 } from 'react-icons/fi';
+import toast from 'react-hot-toast';
 import Hls from 'hls.js';
 import api from '../utils/api';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -177,6 +178,103 @@ const SubtitleOption = styled.button`
   }
 `;
 
+const SubtitleMenuSection = styled.div`
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  margin-top: 0.35rem;
+  padding: 0.75rem 0.8rem 0.4rem;
+`;
+
+const SubtitleSectionLabel = styled.div`
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.5rem;
+`;
+
+const SubtitleSearchRow = styled.div`
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+`;
+
+const SubtitleLanguageInput = styled.input`
+  width: 100%;
+  min-width: 0;
+  height: 2.1rem;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+  padding: 0 0.6rem;
+  font-size: 0.85rem;
+
+  &::placeholder {
+    color: rgba(255, 255, 255, 0.45);
+  }
+`;
+
+const SubtitleSearchButton = styled.button`
+  width: 2.25rem;
+  height: 2.1rem;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: ${({ theme }) => theme.colors.primary};
+  color: white;
+  flex: 0 0 auto;
+
+  &:disabled {
+    opacity: 0.55;
+    cursor: wait;
+  }
+`;
+
+const SubtitleStatusText = styled.div`
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  margin-top: 0.55rem;
+`;
+
+const SubtitleResultButton = styled.button`
+  width: 100%;
+  border: 0;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: white;
+  text-align: left;
+  padding: 0.65rem;
+  margin-top: 0.45rem;
+  display: block;
+  cursor: pointer;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  &:disabled {
+    cursor: wait;
+    opacity: 0.6;
+  }
+`;
+
+const SubtitleResultTitle = styled.div`
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+`;
+
+const SubtitleResultMeta = styled.div`
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.74rem;
+  line-height: 1.35;
+  margin-top: 0.25rem;
+`;
+
 const SubtitleContainer = styled.div`
   position: relative;
   display: inline-block;
@@ -316,6 +414,17 @@ const episodeOptionLabel = (episode) => {
   return `${episodeNumber} - ${episode.episode_title || episode.title || 'Untitled'}`;
 };
 
+const subtitleResultMeta = (result) => {
+  const parts = [];
+  if (result.movieHashMatch) parts.push('hash match');
+  if (result.fps) parts.push(`${result.fps} fps`);
+  if (result.ratings) parts.push(`${result.ratings}/10`);
+  if (result.downloadCount) parts.push(`${result.downloadCount} downloads`);
+  if (result.hearingImpaired) parts.push('HI');
+  if (result.trusted) parts.push('trusted');
+  return parts.join(' | ');
+};
+
 const Watch = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -336,6 +445,11 @@ const Watch = () => {
   const [subtitleTracks, setSubtitleTracks] = useState([]);
   const [activeSubtitle, setActiveSubtitle] = useState(null);
   const [showSubtitleMenu, setShowSubtitleMenu] = useState(false);
+  const [subtitleLanguageQuery, setSubtitleLanguageQuery] = useState('en,hi');
+  const [subtitleSearchResults, setSubtitleSearchResults] = useState([]);
+  const [subtitleSearchLoading, setSubtitleSearchLoading] = useState(false);
+  const [subtitleSearchError, setSubtitleSearchError] = useState('');
+  const [subtitleDownloadId, setSubtitleDownloadId] = useState(null);
   const [trackMenuPosition, setTrackMenuPosition] = useState(null);
   const [videoError, setVideoError] = useState(null);
   const [videoSrc, setVideoSrc] = useState('');
@@ -350,6 +464,7 @@ const Watch = () => {
   const currentTimeRef = useRef(0);
   const streamOffsetRef = useRef(0);
   const playbackRequestRef = useRef(0);
+  const pendingSubtitleFileRef = useRef(null);
 
   const reservePlaybackRequest = useCallback(() => {
     playbackRequestRef.current += 1;
@@ -627,9 +742,17 @@ const Watch = () => {
     setAudioTracks(audio);
     setActiveAudio(selectedAudio);
     setSubtitleTracks(subtitles);
-    setActiveSubtitle((current) => (
-      subtitles.some((track) => track.streamIndex === current && track.extractable) ? current : null
-    ));
+    setActiveSubtitle((current) => {
+      const pendingFileName = pendingSubtitleFileRef.current;
+      if (pendingFileName) {
+        const downloadedTrack = subtitles.find((track) => track.fileName === pendingFileName && track.extractable);
+        if (downloadedTrack) {
+          pendingSubtitleFileRef.current = null;
+          return downloadedTrack.streamIndex;
+        }
+      }
+      return subtitles.some((track) => track.streamIndex === current && track.extractable) ? current : null;
+    });
 
     const sourcePath = playback.streamMode === 'hls' ? playback.hlsUrl : playback.directUrl;
     const sourceUrl = toAbsoluteUrl(sourcePath);
@@ -789,6 +912,10 @@ const Watch = () => {
       setSubtitleTracks([]);
       setActiveAudio(null);
       setActiveSubtitle(null);
+      setSubtitleSearchResults([]);
+      setSubtitleSearchError('');
+      setSubtitleDownloadId(null);
+      pendingSubtitleFileRef.current = null;
       setSeriesNavigation(null);
       setSelectedSeasonNumber('');
 
@@ -998,10 +1125,12 @@ const Watch = () => {
     }
   };
 
-  const getTrackMenuPosition = (button) => {
+  const getTrackMenuPosition = (button, menuName) => {
     const rect = button.getBoundingClientRect();
     const margin = 12;
-    const width = Math.min(280, Math.max(200, window.innerWidth - margin * 2));
+    const targetWidth = menuName === 'subtitles' ? 380 : 280;
+    const minWidth = menuName === 'subtitles' ? 270 : 200;
+    const width = Math.min(targetWidth, Math.max(minWidth, window.innerWidth - margin * 2));
     const idealLeft = rect.left + (rect.width / 2) - (width / 2);
     const left = Math.min(
       Math.max(idealLeft, margin),
@@ -1022,7 +1151,7 @@ const Watch = () => {
     event.stopPropagation();
     const shouldOpen = menuName === 'audio' ? !showAudioMenu : !showSubtitleMenu;
 
-    setTrackMenuPosition(shouldOpen ? getTrackMenuPosition(event.currentTarget) : null);
+    setTrackMenuPosition(shouldOpen ? getTrackMenuPosition(event.currentTarget, menuName) : null);
     setShowAudioMenu(menuName === 'audio' ? shouldOpen : false);
     setShowSubtitleMenu(menuName === 'subtitles' ? shouldOpen : false);
   };
@@ -1061,6 +1190,55 @@ const Watch = () => {
     setActiveSubtitle(Number.isInteger(streamIndex) ? streamIndex : null);
     setShowSubtitleMenu(false);
     setTrackMenuPosition(null);
+  };
+
+  const handleSubtitleSearch = async () => {
+    if (!movie || subtitleSearchLoading) return;
+
+    try {
+      setSubtitleSearchLoading(true);
+      setSubtitleSearchError('');
+      const response = await api.get(`/api/subtitles/${movie.id}/search`, {
+        params: { languages: subtitleLanguageQuery }
+      });
+      setSubtitleSearchResults(response.data.results || []);
+      if (!response.data.results || response.data.results.length === 0) {
+        setSubtitleSearchError('No matching subtitles found.');
+      }
+    } catch (searchError) {
+      const message = searchError.response?.data?.error || 'Subtitle search failed.';
+      setSubtitleSearchError(message);
+      setSubtitleSearchResults([]);
+    } finally {
+      setSubtitleSearchLoading(false);
+    }
+  };
+
+  const handleSubtitleDownload = async (result) => {
+    if (!movie || !result?.fileId || subtitleDownloadId) return;
+
+    try {
+      setSubtitleDownloadId(result.fileId);
+      setSubtitleSearchError('');
+      const shouldResume = Boolean(videoRef && !videoRef.paused) || isPlaying;
+      markPlaybackAutoResume(shouldResume);
+
+      const response = await api.post(`/api/subtitles/${movie.id}/download`, {
+        fileId: result.fileId,
+        language: result.language,
+        fileName: result.fileName
+      });
+      pendingSubtitleFileRef.current = response.data.subtitle?.fileName || null;
+      toast.success('Subtitle downloaded');
+      await loadPlayback(movie.id, activeAudio, streamMode === 'hls' ? currentTimeRef.current : 0, {
+        cacheBust: streamMode === 'hls'
+      });
+    } catch (downloadError) {
+      const message = downloadError.response?.data?.error || 'Subtitle download failed.';
+      setSubtitleSearchError(message);
+    } finally {
+      setSubtitleDownloadId(null);
+    }
   };
 
   const handleSeasonChange = (event) => {
@@ -1325,35 +1503,81 @@ const Watch = () => {
               </SubtitleContainer>
             )}
             
-            {subtitleTracks.length > 0 && (
-              <SubtitleContainer className="track-menu">
-                <ControlButton
-                  onClick={(event) => toggleTrackMenu(event, 'subtitles')}
-                  title="Subtitles"
+            <SubtitleContainer className="track-menu">
+              <ControlButton
+                onClick={(event) => toggleTrackMenu(event, 'subtitles')}
+                title="Subtitles"
+              >
+                <FiType />
+              </ControlButton>
+              <SubtitleMenu $visible={showSubtitleMenu} $position={trackMenuPosition}>
+                <SubtitleOption
+                  onClick={() => handleSubtitleSelect(null)}
+                  className={activeSubtitle === null ? 'active' : ''}
                 >
-                  <FiType />
-                </ControlButton>
-                <SubtitleMenu $visible={showSubtitleMenu} $position={trackMenuPosition}>
+                  Off
+                </SubtitleOption>
+                {subtitleTracks.map((track) => (
                   <SubtitleOption
-                    onClick={() => handleSubtitleSelect(null)}
-                    className={activeSubtitle === null ? 'active' : ''}
+                    key={`${track.streamIndex}-${track.fileName || track.label}`}
+                    onClick={() => handleSubtitleSelect(track.extractable ? track.streamIndex : null)}
+                    className={activeSubtitle === track.streamIndex ? 'active' : ''}
+                    disabled={!track.extractable}
                   >
-                    Off
+                    {track.label}
+                    {!track.extractable && ' (not supported)'}
                   </SubtitleOption>
-                  {subtitleTracks.map((track) => (
-                    <SubtitleOption
-                      key={track.streamIndex}
-                      onClick={() => handleSubtitleSelect(track.extractable ? track.streamIndex : null)}
-                      className={activeSubtitle === track.streamIndex ? 'active' : ''}
-                      disabled={!track.extractable}
+                ))}
+
+                <SubtitleMenuSection>
+                  <SubtitleSectionLabel>Download Subtitles</SubtitleSectionLabel>
+                  <SubtitleSearchRow>
+                    <SubtitleLanguageInput
+                      value={subtitleLanguageQuery}
+                      onChange={(event) => setSubtitleLanguageQuery(event.target.value)}
+                      onClick={(event) => event.stopPropagation()}
+                      placeholder="en,hi"
+                      aria-label="Subtitle languages"
+                    />
+                    <SubtitleSearchButton
+                      type="button"
+                      onClick={handleSubtitleSearch}
+                      disabled={subtitleSearchLoading}
+                      title="Search subtitles"
                     >
-                      {track.label}
-                      {!track.extractable && ' (not supported)'}
-                    </SubtitleOption>
+                      {subtitleSearchLoading ? <FiDownload /> : <FiSearch />}
+                    </SubtitleSearchButton>
+                  </SubtitleSearchRow>
+
+                  {subtitleSearchError && (
+                    <SubtitleStatusText>{subtitleSearchError}</SubtitleStatusText>
+                  )}
+
+                  {!subtitleSearchError && subtitleSearchResults.length === 0 && (
+                    <SubtitleStatusText>
+                      Search by OpenSubtitles hash and title.
+                    </SubtitleStatusText>
+                  )}
+
+                  {subtitleSearchResults.map((result) => (
+                    <SubtitleResultButton
+                      type="button"
+                      key={result.id}
+                      onClick={() => handleSubtitleDownload(result)}
+                      disabled={subtitleDownloadId === result.fileId}
+                      title="Download and load subtitle"
+                    >
+                      <SubtitleResultTitle>
+                        {result.language?.toUpperCase() || 'UND'} - {result.release || result.fileName || 'Subtitle'}
+                      </SubtitleResultTitle>
+                      <SubtitleResultMeta>
+                        {subtitleDownloadId === result.fileId ? 'Downloading...' : (subtitleResultMeta(result) || result.fileName)}
+                      </SubtitleResultMeta>
+                    </SubtitleResultButton>
                   ))}
-                </SubtitleMenu>
-              </SubtitleContainer>
-            )}
+                </SubtitleMenuSection>
+              </SubtitleMenu>
+            </SubtitleContainer>
             
             <ControlButton onClick={handleFullscreen}>
               <FiMaximize2 />

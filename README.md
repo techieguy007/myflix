@@ -47,6 +47,16 @@ Example:
   "metadata": {
     "omdbApiKeys": ["first-key", "second-key"],
     "maxRequestsPerScan": 500
+  },
+  "subtitles": {
+    "languages": ["en", "hi"],
+    "opensubtitles": {
+      "apiKey": "your-opensubtitles-api-key",
+      "username": "your-opensubtitles-username",
+      "password": "your-opensubtitles-password",
+      "userAgent": "MyFlix v1.0.0",
+      "downloadFormat": "webvtt"
+    }
   }
 }
 ```
@@ -136,6 +146,7 @@ Browsers cannot directly play many local-library formats such as MKV, HEVC/x265,
 - HLS remains only as a fallback while a prepared MP4 is still being created.
 - Files with multiple audio tracks expose an audio selector in the player; changing audio uses a prepared MP4 for that selected track when available.
 - Embedded text subtitles are exposed in the subtitle selector and converted to cached WebVTT when selected.
+- The subtitle selector can search OpenSubtitles by movie hash, filename/title, IMDb ID, and season/episode metadata, then download the selected subtitle as a WebVTT sidecar next to the video.
 - Prepared MP4, subtitle, and fallback HLS output are cached locally under `transcodes/` and ignored by Git.
 
 Install `ffmpeg` and `ffprobe` on the server machine for this fallback to work. On Windows, MyFlix prefers the real Chocolatey package binaries under `C:\ProgramData\chocolatey\lib\ffmpeg\tools\ffmpeg\bin` so Task Manager does not show CPU-heavy Chocolatey shim wrappers.
@@ -160,6 +171,29 @@ The Windows service passes these transcoding settings from `config/myflix.config
 Use `ffmpegThreads: 1` for the lowest CPU usage. `realtime: true` only applies to fallback HLS. Prepared MP4 jobs run one at a time. By default, MyFlix prepares an incompatible file the first time you play it, then streams the cached MP4 directly after that. Set `prepareOnStartup: true` when you want to pre-warm the library in the background; `preparedMaxStartupJobs: 0` means no cap, so use a small number if you do not want login-time CPU spikes.
 
 When `deleteOriginalAfterPrepare` is enabled, a successfully prepared MP4 is copied next to the original file, the database is updated to point at that MP4, and then the old source file is deleted with retries. MyFlix does not delete originals with multiple audio tracks or extractable embedded text subtitles unless you explicitly enable the matching override, so alternate audio/subtitle choices are not silently lost.
+
+## OpenSubtitles Downloads
+
+The player subtitle menu includes a `Download Subtitles` section. Enter comma-separated language codes such as:
+
+```text
+en,hi
+```
+
+Then click search and choose a result. MyFlix saves the downloaded subtitle beside the video as:
+
+```text
+Movie Name.en.opensubtitles-123456.vtt
+```
+
+OpenSubtitles requires a valid `Api-Key` header and a valid app-style `User-Agent`; username/password login is used when configured so downloads can use your account quota. You can also set these values with environment variables:
+
+```powershell
+$env:MYFLIX_OPENSUBTITLES_API_KEY = "your-key"
+$env:MYFLIX_OPENSUBTITLES_USERNAME = "your-username"
+$env:MYFLIX_OPENSUBTITLES_PASSWORD = "your-password"
+$env:MYFLIX_SUBTITLE_LANGUAGES = "en,hi"
+```
 
 ## Run At Windows Logon
 
