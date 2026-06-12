@@ -85,6 +85,15 @@ function tokenQuery(req) {
   return req.query.token ? `?token=${encodeURIComponent(req.query.token)}` : '';
 }
 
+function truthyQuery(value) {
+  return ['1', 'true', 'yes', 'mobile', 'compatible'].includes(String(value || '').toLowerCase());
+}
+
+function isMobilePlaybackClient(req) {
+  const userAgent = String(req.headers['user-agent'] || '');
+  return /Android|iPhone|iPad|iPod|Mobile|EdgA|CriOS|FxiOS/i.test(userAgent);
+}
+
 function selectedAudioFromQuery(req) {
   const options = {};
   if (req.query.audio === undefined || req.query.audio === '' || req.query.audio === 'auto') {
@@ -99,6 +108,10 @@ function selectedAudioFromQuery(req) {
   const startSeconds = Number(req.query.start);
   if (Number.isFinite(startSeconds) && startSeconds > 0) {
     options.startSeconds = Math.floor(startSeconds);
+  }
+
+  if (truthyQuery(req.query.compatible) || isMobilePlaybackClient(req)) {
+    options.forceCompatible = true;
   }
 
   return options;
@@ -188,7 +201,8 @@ function serveVideoFile(req, res, movie, videoPath, options = {}) {
 router.get('/:id/playback', streamAuth, async (req, res) => {
   try {
     const movie = await getStreamMovie(req.params.id);
-    const profile = await getPlaybackProfile(movie, selectedAudioFromQuery(req));
+    const playbackOptions = selectedAudioFromQuery(req);
+    const profile = await getPlaybackProfile(movie, playbackOptions);
     const query = tokenQuery(req);
     const directUrl = profile.streamMode === 'prepared'
       ? `/api/stream/${movie.id}/prepared/${profile.preparedVariant}${query}`
@@ -202,6 +216,7 @@ router.get('/:id/playback', streamAuth, async (req, res) => {
       preparedVariant: profile.preparedVariant,
       preparedReady: profile.preparedReady,
       directPlayable: profile.directPlayable,
+      forceCompatible: playbackOptions.forceCompatible || false,
       audioTracks: profile.audioTracks.length,
       subtitleTracks: profile.subtitleTracks.length,
       startSeconds: profile.startSeconds

@@ -7,6 +7,14 @@ import Hls from 'hls.js';
 import api from '../utils/api';
 import LoadingSpinner from '../components/LoadingSpinner';
 
+function shouldPreferCompatiblePlayback() {
+  if (typeof navigator === 'undefined') {
+    return false;
+  }
+
+  return /Android|iPhone|iPad|iPod|Mobile|EdgA|CriOS|FxiOS/i.test(navigator.userAgent || '');
+}
+
 const Container = styled.div`
   min-height: 100vh;
   background: #000;
@@ -765,6 +773,7 @@ const Watch = () => {
     const token = localStorage.getItem('authToken');
     if (token) params.set('token', token);
     if (Number.isInteger(audioStreamIndex)) params.set('audio', String(audioStreamIndex));
+    if (shouldPreferCompatiblePlayback()) params.set('compatible', '1');
     if (Number.isFinite(startSeconds) && startSeconds > 0) {
       params.set('start', String(Math.floor(startSeconds)));
     }
@@ -926,10 +935,14 @@ const Watch = () => {
       try {
         await loadPlayback(movieResponse.data.id);
       } catch (playbackError) {
-        console.warn('Playback profile failed; falling back to direct stream:', playbackError);
+        console.warn('Playback profile failed:', playbackError);
         setPlaybackInfo(null);
-        setStreamMode('direct');
-        setVideoSrc(`${baseUrl}/api/stream/${movieResponse.data.id}${tokenParam()}`);
+        setVideoSrc('');
+        setVideoError({
+          message: 'Video source unavailable',
+          details: playbackError.response?.data?.error
+            || 'MyFlix could not prepare a browser-compatible stream for this file.'
+        });
       }
     } catch (err) {
       console.error('Failed to fetch movie:', err);
