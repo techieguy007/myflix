@@ -16,6 +16,7 @@
     "provider": "omdb",
     "enabled": true,
     "omdbApiKey": "",
+    "omdbApiKeys": [],
     "maxRequestsPerScan": 25
   },
   "service": {

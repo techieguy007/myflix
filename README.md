@@ -25,9 +25,28 @@ Important settings:
 - `media.root`: media folder to scan, default `D:\movies`
 - `media.autoScanOnStart`: rebuilds the index whenever MyFlix starts
 - `media.renameMode`: `suggest` by default; use `apply` only when you want MyFlix to move/rename files
-- `metadata.omdbApiKey`: set this or the `OMDB_API_KEY` environment variable to fetch movie/episode metadata from OMDb
+- `metadata.omdbApiKeys`: set one or more OMDb keys; MyFlix will try the next key if the first is invalid or rate-limited
+- `metadata.omdbApiKey`: single-key fallback for older configs
+- `OMDB_API_KEYS`: optional comma-separated environment variable for OMDb keys
 - `server.host`: `0.0.0.0` allows access from other devices on your local network
 - `server.port`: default `5000`
+
+To keep API keys out of Git, place secrets in an ignored local file:
+
+```text
+config/myflix.local.json
+```
+
+Example:
+
+```json
+{
+  "metadata": {
+    "omdbApiKeys": ["first-key", "second-key"],
+    "maxRequestsPerScan": 500
+  }
+}
+```
 
 Manual scan:
 
