@@ -214,7 +214,7 @@ const ErrorMessage = styled.div`
 `;
 
 const formatTime = (seconds) => {
-  if (isNaN(seconds)) return '0:00';
+  if (!Number.isFinite(seconds)) return '0:00';
   
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
@@ -262,6 +262,20 @@ const Watch = () => {
   const hlsRecoveryRef = useRef({ network: 0, media: 0, native: 0 });
   const hlsRetryTimerRef = useRef(null);
   const currentTimeRef = useRef(0);
+  const streamOffsetRef = useRef(0);
+
+  const getKnownDuration = useCallback(() => {
+    if (videoRef && Number.isFinite(videoRef.duration) && videoRef.duration > 0) {
+      return videoRef.duration;
+    }
+
+    const movieDuration = Number(movie?.duration);
+    if (Number.isFinite(movieDuration) && movieDuration > 0) {
+      return movieDuration;
+    }
+
+    return Number.isFinite(duration) && duration > 0 ? duration : 0;
+  }, [duration, movie?.duration, videoRef]);
 
   useEffect(() => {
     fetchMovie();
@@ -466,9 +480,11 @@ const Watch = () => {
     const audio = tracks.audioTracks || [];
     const subtitles = tracks.subtitleTracks || [];
     const selectedAudio = tracks.selectedAudioStreamIndex ?? (audio[0] ? audio[0].streamIndex : null);
+    const nextStreamOffset = playback.streamMode === 'hls' ? Number(playback.startSeconds || 0) : 0;
 
     setPlaybackInfo(playback);
     setStreamMode(playback.streamMode || 'direct');
+    streamOffsetRef.current = nextStreamOffset;
     setAudioTracks(audio);
     setActiveAudio(selectedAudio);
     setSubtitleTracks(subtitles);
@@ -480,11 +496,14 @@ const Watch = () => {
     setVideoSrc(toAbsoluteUrl(sourcePath));
   };
 
-  const loadPlayback = async (movieId, audioStreamIndex = null) => {
+  const loadPlayback = async (movieId, audioStreamIndex = null, startSeconds = 0) => {
     const params = new URLSearchParams();
     const token = localStorage.getItem('authToken');
     if (token) params.set('token', token);
     if (Number.isInteger(audioStreamIndex)) params.set('audio', String(audioStreamIndex));
+    if (Number.isFinite(startSeconds) && startSeconds > 0) {
+      params.set('start', String(Math.floor(startSeconds)));
+    }
 
     const query = params.toString() ? `?${params.toString()}` : '';
     const playbackResponse = await api.get(`/api/stream/${movieId}/playback${query}`);
@@ -516,6 +535,7 @@ const Watch = () => {
       setVideoError(null);
       setPlaybackInfo(null);
       setStreamMode('direct');
+      streamOffsetRef.current = 0;
       setAudioTracks([]);
       setSubtitleTracks([]);
       setActiveAudio(null);
@@ -562,17 +582,22 @@ const Watch = () => {
 
   const handleTimeUpdate = () => {
     if (videoRef) {
-      currentTimeRef.current = videoRef.currentTime;
-      setCurrentTime(videoRef.currentTime);
+      const absoluteTime = streamMode === 'hls'
+        ? streamOffsetRef.current + videoRef.currentTime
+        : videoRef.currentTime;
+      currentTimeRef.current = absoluteTime;
+      setCurrentTime(absoluteTime);
     }
   };
 
   const handleLoadedMetadata = () => {
     if (videoRef) {
-      setDuration(videoRef.duration);
+      setDuration(getKnownDuration());
 
       if (resumeTimeRef.current > 0) {
-        videoRef.currentTime = resumeTimeRef.current;
+        videoRef.currentTime = streamMode === 'hls'
+          ? Math.max(0, resumeTimeRef.current - streamOffsetRef.current)
+          : resumeTimeRef.current;
         resumeTimeRef.current = 0;
       }
 
@@ -588,29 +613,81 @@ const Watch = () => {
   };
 
   const handleProgressClick = (e) => {
-    if (!videoRef || !duration) return;
+    const knownDuration = getKnownDuration();
+    if (!videoRef || !knownDuration) return;
     
     const rect = e.currentTarget.getBoundingClientRect();
     const percent = (e.clientX - rect.left) / rect.width;
-    const newTime = percent * duration;
-    videoRef.currentTime = newTime;
+    const newTime = percent * knownDuration;
+    seekTo(newTime, 'progress');
   };
 
-  const seekBy = useCallback((seconds) => {
+  const seekTo = useCallback((targetTime, reason = 'seek') => {
     if (!videoRef) return;
 
-    const videoDuration = Number.isFinite(videoRef.duration) ? videoRef.duration : duration;
+    const videoDuration = getKnownDuration();
     const nextTime = Math.min(
       videoDuration || Number.MAX_SAFE_INTEGER,
-      Math.max(0, videoRef.currentTime + seconds)
+      Math.max(0, targetTime)
     );
+    const wasPlaying = !videoRef.paused;
 
-    videoRef.currentTime = nextTime;
+    console.info('Video seek requested', {
+      reason,
+      from: currentTimeRef.current,
+      to: nextTime,
+      duration: videoDuration || null,
+      streamMode
+    });
+
     currentTimeRef.current = nextTime;
     setCurrentTime(nextTime);
     setShowControls(true);
     setVideoError(null);
-  }, [duration, videoRef]);
+
+    if (streamMode === 'hls' && movie) {
+      resumeTimeRef.current = 0;
+      shouldResumeRef.current = wasPlaying;
+      videoRef.pause();
+      loadPlayback(movie.id, activeAudio, nextTime).catch((error) => {
+        console.error('Failed to seek HLS stream:', error);
+        setVideoError({
+          message: 'Seek failed',
+          details: 'MyFlix could not prepare the stream at that timestamp. Try again in a few seconds.'
+        });
+      });
+      return;
+    }
+
+    const hls = streamMode === 'hls' ? hlsRef.current : null;
+    if (hls) {
+      try {
+        hls.stopLoad();
+      } catch (error) {
+        console.warn('Unable to pause HLS loading before seek:', error);
+      }
+    }
+
+    videoRef.currentTime = nextTime;
+
+    if (hls) {
+      try {
+        hls.startLoad(nextTime);
+      } catch (error) {
+        console.warn('Unable to restart HLS loading after seek:', error);
+      }
+    }
+
+    if (wasPlaying) {
+      videoRef.play().catch((error) => {
+        console.warn('Unable to resume playback after seek:', error);
+      });
+    }
+  }, [activeAudio, getKnownDuration, movie, streamMode, videoRef]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const seekBy = useCallback((seconds) => {
+    seekTo(currentTimeRef.current + seconds, seconds > 0 ? 'keyboard-forward' : 'keyboard-back');
+  }, [seekTo]);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -622,18 +699,21 @@ const Watch = () => {
       );
 
       if (isTyping) return;
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
 
-      if (event.key === 'ArrowRight') {
+      if (event.key === 'ArrowRight' || event.code === 'ArrowRight' || event.key === 'Right') {
         event.preventDefault();
+        event.stopPropagation();
         seekBy(30);
-      } else if (event.key === 'ArrowLeft') {
+      } else if (event.key === 'ArrowLeft' || event.code === 'ArrowLeft' || event.key === 'Left') {
         event.preventDefault();
+        event.stopPropagation();
         seekBy(-10);
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => document.removeEventListener('keydown', handleKeyDown, true);
   }, [seekBy]);
 
   const handleMouseMove = () => {
@@ -688,13 +768,15 @@ const Watch = () => {
     }
 
     try {
-      resumeTimeRef.current = videoRef ? videoRef.currentTime : 0;
+      resumeTimeRef.current = streamMode === 'hls'
+        ? currentTimeRef.current
+        : (videoRef ? videoRef.currentTime : 0);
       shouldResumeRef.current = isPlaying;
       setVideoError(null);
       setShowAudioMenu(false);
       setTrackMenuPosition(null);
       if (videoRef) videoRef.pause();
-      await loadPlayback(movie.id, streamIndex);
+      await loadPlayback(movie.id, streamIndex, streamMode === 'hls' ? resumeTimeRef.current : 0);
     } catch (trackError) {
       console.error('Failed to switch audio track:', trackError);
       setVideoError({
@@ -728,7 +810,8 @@ const Watch = () => {
     );
   }
 
-  const progress = duration ? (currentTime / duration) * 100 : 0;
+  const displayDuration = getKnownDuration();
+  const progress = displayDuration ? (currentTime / displayDuration) * 100 : 0;
   const videoElementSrc = streamMode === 'hls' && Hls.isSupported() ? undefined : videoSrc;
 
   return (
@@ -871,6 +954,7 @@ const Watch = () => {
           controls={false}
           crossOrigin="anonymous"
           preload="metadata"
+          tabIndex="0"
         >
           {extractableSubtitleTracks.map((track) => (
             <track
@@ -975,7 +1059,7 @@ const Watch = () => {
             </ControlButton>
             
             <TimeDisplay>
-              {formatTime(currentTime)} / {formatTime(duration)}
+              {formatTime(currentTime)} / {formatTime(displayDuration)}
             </TimeDisplay>
           </ControlButtons>
         </Controls>

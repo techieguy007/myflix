@@ -85,12 +85,22 @@ function tokenQuery(req) {
 }
 
 function selectedAudioFromQuery(req) {
+  const options = {};
   if (req.query.audio === undefined || req.query.audio === '' || req.query.audio === 'auto') {
-    return {};
+    // Keep automatic selection.
+  } else {
+    const audioStreamIndex = Number(req.query.audio);
+    if (Number.isInteger(audioStreamIndex)) {
+      options.audioStreamIndex = audioStreamIndex;
+    }
   }
 
-  const audioStreamIndex = Number(req.query.audio);
-  return Number.isInteger(audioStreamIndex) ? { audioStreamIndex } : {};
+  const startSeconds = Number(req.query.start);
+  if (Number.isFinite(startSeconds) && startSeconds > 0) {
+    options.startSeconds = Math.floor(startSeconds);
+  }
+
+  return options;
 }
 
 async function getStreamMovie(movieId) {
@@ -125,7 +135,8 @@ router.get('/:id/playback', streamAuth, async (req, res) => {
       hlsVariant: profile.hlsVariant,
       directPlayable: profile.directPlayable,
       audioTracks: profile.audioTracks.length,
-      subtitleTracks: profile.subtitleTracks.length
+      subtitleTracks: profile.subtitleTracks.length,
+      startSeconds: profile.startSeconds
     });
 
     res.json({
@@ -134,6 +145,7 @@ router.get('/:id/playback', streamAuth, async (req, res) => {
       streamMode: profile.streamMode,
       directUrl: `/api/stream/${movie.id}${query}`,
       hlsUrl: `/api/stream/${movie.id}/hls/${profile.hlsVariant}/index.m3u8${query}`,
+      startSeconds: profile.startSeconds,
       compatibility: profile
     });
   } catch (error) {
