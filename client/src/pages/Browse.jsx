@@ -356,7 +356,14 @@ const Browse = () => {
   const { isAdmin } = useAuth();
   const [movies, setMovies] = useState([]);
   const [series, setSeries] = useState([]);
-  const [counts, setCounts] = useState({ movies: 0, series: 0, episodes: 0, total: 0 });
+  const [counts, setCounts] = useState({
+    movies: 0,
+    series: 0,
+    episodes: 0,
+    total: 0,
+    indexedTotal: 0,
+    hidden: 0
+  });
   const [scanState, setScanState] = useState(null);
   const [scanResult, setScanResult] = useState(null);
   const [manualScanRunning, setManualScanRunning] = useState(false);
@@ -374,7 +381,14 @@ const Browse = () => {
       const response = await api.get('/api/library');
       setMovies(response.data.movies || []);
       setSeries(response.data.series || []);
-      setCounts(response.data.counts || { movies: 0, series: 0, episodes: 0, total: 0 });
+      setCounts(response.data.counts || {
+        movies: 0,
+        series: 0,
+        episodes: 0,
+        total: 0,
+        indexedTotal: 0,
+        hidden: 0
+      });
       setScanState(response.data.scan || null);
     } catch (err) {
       console.error('Failed to fetch library:', err);
@@ -462,6 +476,8 @@ const Browse = () => {
 
   const isScanning = manualScanRunning || scanState?.running;
   const visibleScanResult = scanResult || scanState?.lastResult;
+  const hiddenPendingCount = counts.hidden || 0;
+  const hasIndexedButUnavailable = (counts.indexedTotal || 0) > 0 && (counts.total || 0) === 0;
 
   const selectedSeasonForShow = (show) => {
     const seasons = show.seasons || [];
@@ -500,7 +516,7 @@ const Browse = () => {
             </Button>
             <Button className="secondary" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
               <FiInfo />
-              {counts.total || 0} indexed items
+              {counts.total || 0} available items
             </Button>
             {isAdmin && (
               <Button
@@ -532,6 +548,11 @@ const Browse = () => {
               {isScanning ? 'Scanning media folder now...' : scanSummary(visibleScanResult)}
             </ScanStatus>
           )}
+          {hiddenPendingCount > 0 && (
+            <ScanStatus>
+              {hiddenPendingCount} indexed items are hidden until conversion finishes or compatibility is verified.
+            </ScanStatus>
+          )}
         </HeroContent>
       </Hero>
 
@@ -543,9 +564,11 @@ const Browse = () => {
           </EmptyState>
         ) : movies.length === 0 && series.length === 0 ? (
           <EmptyState>
-            <EmptyTitle>No Media Yet</EmptyTitle>
+            <EmptyTitle>{hasIndexedButUnavailable ? 'No Playable Media Yet' : 'No Media Yet'}</EmptyTitle>
             <EmptyDescription>
-              MyFlix scans your configured media folder on startup. Admin users can rebuild the index from this page.
+              {hasIndexedButUnavailable
+                ? `${counts.indexedTotal} indexed items are waiting for conversion or compatibility verification. They will appear here as they become browser-ready.`
+                : 'MyFlix scans your configured media folder on startup. Admin users can rebuild the index from this page.'}
             </EmptyDescription>
           </EmptyState>
         ) : (
