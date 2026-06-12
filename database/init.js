@@ -249,6 +249,52 @@ function initializeTables() {
         console.log('Media conversions table ready');
       }
     });
+
+    db.run(`
+      CREATE TABLE IF NOT EXISTS background_conversion_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        movie_id INTEGER NOT NULL,
+        title TEXT,
+        source_path TEXT,
+        status TEXT NOT NULL DEFAULT 'queued',
+        encoder_preference TEXT DEFAULT 'auto',
+        encoder_used TEXT,
+        audio_stream_index INTEGER,
+        reason TEXT,
+        error TEXT,
+        progress_percent REAL DEFAULT 0,
+        progress_time_seconds REAL DEFAULT 0,
+        fps TEXT,
+        speed TEXT,
+        output_path TEXT,
+        attempts INTEGER DEFAULT 0,
+        started_at DATETIME,
+        finished_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (movie_id) REFERENCES movies (id)
+      )
+    `, (err) => {
+      if (err) {
+        console.error('Error creating background_conversion_jobs table:', err);
+      } else {
+        console.log('Background conversion jobs table ready');
+      }
+    });
+
+    db.run(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `, (err) => {
+      if (err) {
+        console.error('Error creating app_settings table:', err);
+      } else {
+        console.log('App settings table ready');
+      }
+    });
   });
 }
 

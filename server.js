@@ -20,6 +20,7 @@ const { runLibraryScan } = require('./lib/libraryScanner');
 const {
   cleanupPendingPromotedOriginals,
   queuePreparedMediaForLibrary,
+  startBackgroundConversionQueue,
   stopAllTranscodeJobs
 } = require('./lib/transcoder');
 
@@ -301,6 +302,10 @@ server = app.listen(PORT, HOST, () => {
   if (process.env.NODE_ENV !== 'production') {
     console.log('Development mode - Frontend running at: http://localhost:3000');
   }
+  startBackgroundConversionQueue('startup')
+    .catch((error) => {
+      logger.error('background_conversion.startup_resume_failed', { error });
+    });
   scheduleStartupScan();
 });
 

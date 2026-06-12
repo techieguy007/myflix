@@ -4,7 +4,14 @@ const { optionalAuth, authenticateToken, requireAdmin } = require('../middleware
 const { loadConfig } = require('../lib/config');
 const { getScanState, runLibraryScan } = require('../lib/libraryScanner');
 const logger = require('../lib/logger');
-const { queuePreparedMediaForLibrary } = require('../lib/transcoder');
+const {
+  getBackgroundConversionQueueState,
+  queueBackgroundConversionsForLibrary,
+  queueBackgroundConversionsForMovieIds,
+  queuePreparedMediaForLibrary,
+  setBackgroundConversionPaused,
+  startBackgroundConversionQueue
+} = require('../lib/transcoder');
 
 const router = express.Router();
 
@@ -172,6 +179,92 @@ router.get('/conversions', authenticateToken, requireAdmin, async (req, res) => 
       error
     });
     res.status(500).json({ error: 'Failed to fetch conversion history' });
+  }
+});
+
+router.get('/conversion-queue', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const state = await getBackgroundConversionQueueState();
+    logger.info('library.conversion_queue_requested', {
+      requestId: req.requestId,
+      userId: req.user && (req.user.userId || req.user.id),
+      queued: state.counts.queued,
+      running: state.counts.running,
+      paused: state.paused
+    });
+    res.json(state);
+  } catch (error) {
+    logger.error('library.conversion_queue_failed', {
+      requestId: req.requestId,
+      userId: req.user && (req.user.userId || req.user.id),
+      error
+    });
+    res.status(500).json({ error: 'Failed to fetch conversion queue' });
+  }
+});
+
+router.post('/conversion-queue/selected', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const result = await queueBackgroundConversionsForMovieIds(req.body?.movieIds || [], {
+      encoderPreference: req.body?.encoderPreference || 'auto',
+      force: req.body?.force === true,
+      reason: 'manual-selected'
+    });
+    const state = await startBackgroundConversionQueue('manual-selected');
+    res.json({ result, queue: state });
+  } catch (error) {
+    logger.error('library.conversion_queue_selected_failed', {
+      requestId: req.requestId,
+      userId: req.user && (req.user.userId || req.user.id),
+      error
+    });
+    res.status(500).json({ error: error.message || 'Failed to queue selected conversions' });
+  }
+});
+
+router.post('/conversion-queue/all', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const result = await queueBackgroundConversionsForLibrary({
+      encoderPreference: req.body?.encoderPreference || 'auto',
+      force: req.body?.force === true,
+      reason: 'manual-all'
+    });
+    const state = await startBackgroundConversionQueue('manual-all');
+    res.json({ result, queue: state });
+  } catch (error) {
+    logger.error('library.conversion_queue_all_failed', {
+      requestId: req.requestId,
+      userId: req.user && (req.user.userId || req.user.id),
+      error
+    });
+    res.status(500).json({ error: error.message || 'Failed to queue library conversions' });
+  }
+});
+
+router.post('/conversion-queue/pause', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    res.json(await setBackgroundConversionPaused(true));
+  } catch (error) {
+    logger.error('library.conversion_queue_pause_failed', {
+      requestId: req.requestId,
+      userId: req.user && (req.user.userId || req.user.id),
+      error
+    });
+    res.status(500).json({ error: error.message || 'Failed to pause conversion queue' });
+  }
+});
+
+router.post('/conversion-queue/resume', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    await setBackgroundConversionPaused(false);
+    res.json(await startBackgroundConversionQueue('manual-resume'));
+  } catch (error) {
+    logger.error('library.conversion_queue_resume_failed', {
+      requestId: req.requestId,
+      userId: req.user && (req.user.userId || req.user.id),
+      error
+    });
+    res.status(500).json({ error: error.message || 'Failed to resume conversion queue' });
   }
 });
 

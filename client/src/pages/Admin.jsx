@@ -3,7 +3,20 @@ import { useQuery, useMutation, useQueryClient } from 'react-query';
 import styled from 'styled-components';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { FiUpload, FiTrash2, FiEdit, FiPlus, FiX, FiCheck, FiCheckSquare, FiSquare, FiRefreshCw } from 'react-icons/fi';
+import {
+  FiUpload,
+  FiTrash2,
+  FiEdit,
+  FiPlus,
+  FiX,
+  FiCheck,
+  FiCheckSquare,
+  FiSquare,
+  FiRefreshCw,
+  FiCpu,
+  FiPlay,
+  FiPause
+} from 'react-icons/fi';
 import api from '../utils/api';
 
 const Container = styled.div`
@@ -136,6 +149,7 @@ const MovieInfo = styled.div`
 
 const SelectionControls = styled.div`
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 1rem;
   margin-bottom: 2rem;
@@ -492,6 +506,29 @@ const buildSecondaryMeta = (item) => {
   return parts.join(' - ');
 };
 
+const formatPercent = (value) => {
+  const percent = Number(value || 0);
+  if (!Number.isFinite(percent)) return '0%';
+  return `${Math.round(percent)}%`;
+};
+
+const queueStatusStyle = (status) => {
+  switch (status) {
+    case 'running':
+      return { color: '#4da3ff', label: 'Running' };
+    case 'queued':
+      return { color: '#f5c542', label: 'Queued' };
+    case 'completed':
+      return { color: '#46d369', label: 'Completed' };
+    case 'failed':
+      return { color: '#ff5c5c', label: 'Failed' };
+    case 'skipped':
+      return { color: '#999', label: 'Skipped' };
+    default:
+      return { color: '#ccc', label: status || 'Unknown' };
+  }
+};
+
 const Admin = () => {
   const [activeTab, setActiveTab] = useState('scan');
   const [selectedFile, setSelectedFile] = useState(null);
@@ -504,6 +541,7 @@ const Admin = () => {
   const [selectedMovies, setSelectedMovies] = useState([]);
   const [isSelecting, setIsSelecting] = useState(false);
   const [manageFilter, setManageFilter] = useState('movies');
+  const [encoderPreference, setEncoderPreference] = useState('auto');
   const [conversionDialog, setConversionDialog] = useState(null);
   const [isConverting, setIsConverting] = useState(false);
   const [conversionProgress, setConversionProgress] = useState(null);
@@ -540,6 +578,20 @@ const Admin = () => {
       return response.data;
     },
     enabled: activeTab === 'conversions'
+  });
+
+  const {
+    data: conversionQueue,
+    isLoading: conversionQueueLoading,
+    refetch: refetchConversionQueue
+  } = useQuery({
+    queryKey: ['admin-conversion-queue'],
+    queryFn: async () => {
+      const response = await api.get('/api/library/conversion-queue');
+      return response.data;
+    },
+    enabled: activeTab === 'conversions' || activeTab === 'manage',
+    refetchInterval: activeTab === 'conversions' ? 5000 : false
   });
 
   // Delete movie mutation
@@ -586,6 +638,74 @@ const Admin = () => {
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || 'Failed to update movie');
+    }
+  });
+
+  const queueSelectedConversionMutation = useMutation({
+    mutationFn: async (movieIds) => {
+      const response = await api.post('/api/library/conversion-queue/selected', {
+        movieIds,
+        encoderPreference
+      });
+      return response.data;
+    },
+    onSuccess: (data) => {
+      const queued = data?.result?.queued || 0;
+      const skipped = data?.result?.skipped || 0;
+      const alreadyQueued = data?.result?.alreadyQueued || 0;
+      toast.success(`Queued ${queued} conversion(s). ${skipped + alreadyQueued} skipped/already queued.`);
+      setSelectedMovies([]);
+      setIsSelecting(false);
+      queryClient.invalidateQueries(['admin-conversion-queue']);
+      queryClient.invalidateQueries(['admin-conversions']);
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.error || 'Failed to queue selected conversions');
+    }
+  });
+
+  const queueAllConversionMutation = useMutation({
+    mutationFn: async () => {
+      const response = await api.post('/api/library/conversion-queue/all', {
+        encoderPreference
+      });
+      return response.data;
+    },
+    onSuccess: (data) => {
+      toast.success(`Queued ${data?.result?.queued || 0} background conversion(s).`);
+      queryClient.invalidateQueries(['admin-conversion-queue']);
+      queryClient.invalidateQueries(['admin-conversions']);
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.error || 'Failed to queue library conversions');
+    }
+  });
+
+  const pauseConversionQueueMutation = useMutation({
+    mutationFn: async () => {
+      const response = await api.post('/api/library/conversion-queue/pause');
+      return response.data;
+    },
+    onSuccess: () => {
+      toast.success('Background conversion will pause after the current file');
+      queryClient.invalidateQueries(['admin-conversion-queue']);
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.error || 'Failed to pause conversion queue');
+    }
+  });
+
+  const resumeConversionQueueMutation = useMutation({
+    mutationFn: async () => {
+      const response = await api.post('/api/library/conversion-queue/resume');
+      return response.data;
+    },
+    onSuccess: () => {
+      toast.success('Background conversion resumed');
+      queryClient.invalidateQueries(['admin-conversion-queue']);
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.error || 'Failed to resume conversion queue');
     }
   });
 
@@ -697,6 +817,18 @@ const Admin = () => {
     if (window.confirm(confirmMessage)) {
       bulkDeleteMutation.mutate(selectedMovies);
     }
+  };
+
+  const handleQueueSelectedConversions = () => {
+    if (selectedMovies.length === 0) {
+      toast.error('No library items selected');
+      return;
+    }
+    queueSelectedConversionMutation.mutate(selectedMovies);
+  };
+
+  const handleQueueMovieConversion = (movieId) => {
+    queueSelectedConversionMutation.mutate([movieId]);
   };
 
   const handleCancelSelection = () => {
@@ -1222,10 +1354,19 @@ const Admin = () => {
                 </span>
                 
                 <div style={{ marginLeft: 'auto' }}>
+                  <SelectionButton
+                    variant="primary"
+                    onClick={handleQueueSelectedConversions}
+                    disabled={selectedMovies.length === 0 || queueSelectedConversionMutation.isLoading}
+                    title="Queue selected items for browser-compatible MP4 conversion"
+                  >
+                    <FiCpu /> Convert Selected ({selectedMovies.length})
+                  </SelectionButton>
                   <SelectionButton 
                     variant="danger" 
                     onClick={handleDeleteSelected}
                     disabled={selectedMovies.length === 0}
+                    style={{ marginLeft: '0.5rem' }}
                   >
                     <FiTrash2 /> Remove Selected ({selectedMovies.length})
                   </SelectionButton>
@@ -1280,6 +1421,12 @@ const Admin = () => {
                       
                       {!isSelecting && (
                         <MovieActions>
+                          <ActionButton
+                            onClick={() => handleQueueMovieConversion(movie.id)}
+                            title="Queue browser-compatible MP4 conversion"
+                          >
+                            <FiCpu />
+                          </ActionButton>
                           <ActionButton 
                             onClick={() => handleEditMovie(movie)}
                             title="Edit movie details"
@@ -1316,12 +1463,182 @@ const Admin = () => {
               </div>
               <SelectionButton
                 variant="secondary"
-                onClick={() => refetchConversions()}
-                disabled={conversionsLoading}
+                onClick={() => {
+                  refetchConversions();
+                  refetchConversionQueue();
+                }}
+                disabled={conversionsLoading || conversionQueueLoading}
               >
                 <FiRefreshCw /> Refresh
               </SelectionButton>
             </div>
+
+            <div style={{
+              background: '#222',
+              border: '1px solid #333',
+              borderRadius: '8px',
+              padding: '1rem',
+              marginBottom: '2rem'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+                <div>
+                  <h3 style={{ color: 'white', margin: 0 }}>Background Conversion Queue</h3>
+                  <p style={{ color: '#999', marginTop: '0.35rem', marginBottom: 0 }}>
+                    Runs prepared MP4 conversion in the background until the queue is empty. Pause stops after the current file.
+                  </p>
+                </div>
+                <div style={{ color: conversionQueue?.capabilities?.h264Nvenc ? '#46d369' : '#f5c542', fontWeight: 700 }}>
+                  GPU: {conversionQueue?.capabilities?.h264Nvenc ? 'h264_nvenc available' : 'not available'}
+                </div>
+              </div>
+
+              <ManageFilterBar>
+                {['auto', 'gpu', 'cpu'].map((mode) => (
+                  <ManageFilterButton
+                    key={mode}
+                    active={encoderPreference === mode}
+                    onClick={() => setEncoderPreference(mode)}
+                    title={mode === 'auto' ? 'Use GPU when available, otherwise CPU' : `Use ${mode.toUpperCase()} encoding preference`}
+                  >
+                    {mode.toUpperCase()}
+                  </ManageFilterButton>
+                ))}
+              </ManageFilterBar>
+
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                gap: '1rem',
+                marginBottom: '1rem'
+              }}>
+                {[
+                  ['Queued', conversionQueue?.counts?.queued || 0],
+                  ['Running', conversionQueue?.counts?.running || 0],
+                  ['Completed', conversionQueue?.counts?.completed || 0],
+                  ['Failed', conversionQueue?.counts?.failed || 0],
+                  ['Skipped', conversionQueue?.counts?.skipped || 0]
+                ].map(([label, value]) => (
+                  <div
+                    key={label}
+                    style={{
+                      background: '#1a1a1a',
+                      border: '1px solid #333',
+                      borderRadius: '6px',
+                      padding: '0.85rem'
+                    }}
+                  >
+                    <div style={{ color: '#999', fontSize: '0.8rem' }}>{label}</div>
+                    <div style={{ color: 'white', fontSize: '1.35rem', fontWeight: 700 }}>{value}</div>
+                  </div>
+                ))}
+              </div>
+
+              {conversionQueue?.active && (
+                <div style={{
+                  background: '#151515',
+                  border: '1px solid #333',
+                  borderRadius: '6px',
+                  padding: '0.85rem',
+                  marginBottom: '1rem',
+                  color: '#ddd'
+                }}>
+                  <strong>Now converting:</strong> {conversionQueue.active.title}
+                  <div style={{ marginTop: '0.5rem', height: '8px', background: '#333', borderRadius: '999px', overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%',
+                      width: formatPercent(conversionQueue.active.progress_percent),
+                      background: '#e50914'
+                    }} />
+                  </div>
+                  <div style={{ color: '#999', fontSize: '0.85rem', marginTop: '0.35rem' }}>
+                    {formatPercent(conversionQueue.active.progress_percent)}
+                    {conversionQueue.active.speed ? ` - ${conversionQueue.active.speed}` : ''}
+                    {conversionQueue.active.encoder_used ? ` - ${conversionQueue.active.encoder_used}` : ''}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <SelectionButton
+                  variant="primary"
+                  onClick={() => queueAllConversionMutation.mutate()}
+                  disabled={queueAllConversionMutation.isLoading}
+                >
+                  <FiCpu /> Convert All Needed Files
+                </SelectionButton>
+                {conversionQueue?.paused ? (
+                  <SelectionButton
+                    variant="secondary"
+                    onClick={() => resumeConversionQueueMutation.mutate()}
+                    disabled={resumeConversionQueueMutation.isLoading}
+                  >
+                    <FiPlay /> Resume Queue
+                  </SelectionButton>
+                ) : (
+                  <SelectionButton
+                    variant="secondary"
+                    onClick={() => pauseConversionQueueMutation.mutate()}
+                    disabled={pauseConversionQueueMutation.isLoading}
+                  >
+                    <FiPause /> Pause Queue
+                  </SelectionButton>
+                )}
+              </div>
+            </div>
+
+            {conversionQueue?.jobs?.length > 0 && (
+              <div style={{ overflowX: 'auto', border: '1px solid #333', borderRadius: '8px', marginBottom: '2rem' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '900px' }}>
+                  <thead>
+                    <tr style={{ background: '#222', color: '#b3b3b3', textAlign: 'left' }}>
+                      <th style={{ padding: '0.9rem' }}>Queued File</th>
+                      <th style={{ padding: '0.9rem' }}>Status</th>
+                      <th style={{ padding: '0.9rem' }}>Encoder</th>
+                      <th style={{ padding: '0.9rem' }}>Progress</th>
+                      <th style={{ padding: '0.9rem' }}>Updated</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {conversionQueue.jobs.slice(0, 12).map((job) => {
+                      const status = queueStatusStyle(job.status);
+                      return (
+                        <tr key={job.id} style={{ borderTop: '1px solid #333', color: '#ddd', verticalAlign: 'top' }}>
+                          <td style={{ padding: '0.9rem', fontWeight: 600 }}>
+                            {job.title || `Movie ${job.movie_id}`}
+                            <div style={{ color: '#777', fontSize: '0.8rem', marginTop: '0.25rem' }}>
+                              ID {job.movie_id} - {job.source_path || '-'}
+                            </div>
+                          </td>
+                          <td style={{ padding: '0.9rem' }}>
+                            <span style={{ color: status.color, fontWeight: 700 }}>{status.label}</span>
+                            {(job.error || job.reason) && (
+                              <div style={{ color: '#888', fontSize: '0.8rem', marginTop: '0.25rem' }}>
+                                {job.error || job.reason}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: '0.9rem', color: '#b3b3b3' }}>
+                            <div>{job.encoder_used || job.encoder_preference || 'auto'}</div>
+                            <div style={{ color: '#777', fontSize: '0.8rem', marginTop: '0.25rem' }}>
+                              Preference: {job.encoder_preference || 'auto'}
+                            </div>
+                          </td>
+                          <td style={{ padding: '0.9rem', color: '#b3b3b3' }}>
+                            <div>{formatPercent(job.progress_percent)}</div>
+                            <div style={{ color: '#777', fontSize: '0.8rem', marginTop: '0.25rem' }}>
+                              {job.speed || ''}{job.fps ? ` ${job.fps} fps` : ''}
+                            </div>
+                          </td>
+                          <td style={{ padding: '0.9rem', color: '#b3b3b3' }}>
+                            {formatDateTime(job.updated_at || job.created_at)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
             {conversionsLoading ? (
               <div style={{ textAlign: 'center', padding: '2rem' }}>
