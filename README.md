@@ -87,7 +87,21 @@ Browsers cannot directly play many local-library formats such as MKV, HEVC/x265,
 - Embedded text subtitles are exposed in the subtitle selector and converted to cached WebVTT when selected.
 - HLS output is cached locally under `transcodes/` and ignored by Git.
 
-Install `ffmpeg` and `ffprobe` on the server machine for this fallback to work. The Windows service uses the system PATH, or you can set `FFMPEG_PATH` and `FFPROBE_PATH` environment variables.
+Install `ffmpeg` and `ffprobe` on the server machine for this fallback to work. On Windows, MyFlix prefers the real Chocolatey package binaries under `C:\ProgramData\chocolatey\lib\ffmpeg\tools\ffmpeg\bin` so Task Manager does not show CPU-heavy Chocolatey shim wrappers.
+
+The Windows service passes these transcoding settings from `config/myflix.config.json`:
+
+```json
+"transcoding": {
+  "ffmpegPath": "C:\\ProgramData\\chocolatey\\lib\\ffmpeg\\tools\\ffmpeg\\bin\\ffmpeg.exe",
+  "ffprobePath": "C:\\ProgramData\\chocolatey\\lib\\ffmpeg\\tools\\ffmpeg\\bin\\ffprobe.exe",
+  "ffmpegThreads": 2,
+  "ffmpegPreset": "ultrafast",
+  "realtime": true
+}
+```
+
+Use `ffmpegThreads: 1` for the lowest CPU usage. `realtime: true` keeps ffmpeg from racing through the whole movie as fast as possible.
 
 ## Run At Windows Logon
 

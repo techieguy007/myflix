@@ -20,6 +20,13 @@
     "omdbApiKeys": [],
     "maxRequestsPerScan": 25
   },
+  "transcoding": {
+    "ffmpegPath": "C:\\ProgramData\\chocolatey\\lib\\ffmpeg\\tools\\ffmpeg\\bin\\ffmpeg.exe",
+    "ffprobePath": "C:\\ProgramData\\chocolatey\\lib\\ffmpeg\\tools\\ffmpeg\\bin\\ffprobe.exe",
+    "ffmpegThreads": 2,
+    "ffmpegPreset": "ultrafast",
+    "realtime": true
+  },
   "service": {
     "nodeExe": "C:\\Program Files\\nodejs\\node.exe",
     "logDirectory": "logs",

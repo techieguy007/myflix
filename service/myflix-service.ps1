@@ -105,6 +105,11 @@ function Get-Runtime {
         AutoScan = [bool](Get-NestedValue $Config "media" "autoScanOnStart" $true)
         RenameMode = [string](Get-NestedValue $Config "media" "renameMode" "suggest")
         OmdbApiKey = [string](Get-NestedValue $Config "metadata" "omdbApiKey" "")
+        FfmpegPath = [string](Get-NestedValue $Config "transcoding" "ffmpegPath" "")
+        FfprobePath = [string](Get-NestedValue $Config "transcoding" "ffprobePath" "")
+        FfmpegThreads = [int](Get-NestedValue $Config "transcoding" "ffmpegThreads" 2)
+        FfmpegPreset = [string](Get-NestedValue $Config "transcoding" "ffmpegPreset" "ultrafast")
+        FfmpegRealtime = [bool](Get-NestedValue $Config "transcoding" "realtime" $true)
     }
 }
 
@@ -320,9 +325,19 @@ switch ($Action) {
         if (-not [string]::IsNullOrWhiteSpace($Runtime.OmdbApiKey)) {
             $env:OMDB_API_KEY = $Runtime.OmdbApiKey
         }
+        if (-not [string]::IsNullOrWhiteSpace($Runtime.FfmpegPath)) {
+            $env:FFMPEG_PATH = $Runtime.FfmpegPath
+        }
+        if (-not [string]::IsNullOrWhiteSpace($Runtime.FfprobePath)) {
+            $env:FFPROBE_PATH = $Runtime.FfprobePath
+        }
+        $env:MYFLIX_FFMPEG_THREADS = "$($Runtime.FfmpegThreads)"
+        $env:MYFLIX_FFMPEG_PRESET = $Runtime.FfmpegPreset
+        $env:MYFLIX_FFMPEG_REALTIME = if ($Runtime.FfmpegRealtime) { "true" } else { "false" }
 
         Add-Content -Path $outLog -Value "[$(Get-Date -Format o)] Starting MyFlix at $($Runtime.Url)"
         Add-Content -Path $outLog -Value "[$(Get-Date -Format o)] Media root: $($Runtime.MediaRoot)"
+        Add-Content -Path $outLog -Value "[$(Get-Date -Format o)] FFmpeg preset: $($Runtime.FfmpegPreset), threads: $($Runtime.FfmpegThreads), realtime: $($Runtime.FfmpegRealtime)"
         Add-Content -Path $outLog -Value "[$(Get-Date -Format o)] Config: $ConfigPath"
 
         $readinessErrors = Get-AppReadinessErrors $RepoDir $Runtime
