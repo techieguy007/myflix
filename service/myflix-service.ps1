@@ -310,7 +310,6 @@ switch ($Action) {
         $env:HOST = $Runtime.Host
         $env:PORT = "$($Runtime.Port)"
         $env:MYFLIX_MEDIA_ROOT = $Runtime.MediaRoot
-        $env:MYFLIX_AUTO_SCAN = if ($Runtime.AutoScan) { "true" } else { "false" }
         $env:MYFLIX_RENAME_MODE = $Runtime.RenameMode
         $env:MYFLIX_DISABLE_DEMO_SEED = "true"
         if (-not [string]::IsNullOrWhiteSpace($Runtime.OmdbApiKey)) {
@@ -334,9 +333,21 @@ switch ($Action) {
             Start-Process $Runtime.Url
         }
 
-        & $Runtime.NodeExe $ServerPath 1>> $outLog 2>> $errLog
-        $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }
-        Add-Content -Path $outLog -Value "[$(Get-Date -Format o)] MyFlix exited with code $exitCode"
-        exit $exitCode
+        $env:MYFLIX_AUTO_SCAN = if ($Runtime.AutoScan) { "true" } else { "false" }
+        Add-Content -Path $outLog -Value "[$(Get-Date -Format o)] Launching detached Node process. Startup scan: $($env:MYFLIX_AUTO_SCAN)"
+
+        $nodeOutLog = Join-Path $Runtime.LogDirectory "myflix-node.out.log"
+        $nodeErrLog = Join-Path $Runtime.LogDirectory "myflix-node.err.log"
+        $process = Start-Process `
+            -FilePath $Runtime.NodeExe `
+            -ArgumentList @($ServerPath) `
+            -WorkingDirectory $RepoDir `
+            -WindowStyle Hidden `
+            -RedirectStandardOutput $nodeOutLog `
+            -RedirectStandardError $nodeErrLog `
+            -PassThru
+
+        Add-Content -Path $outLog -Value "[$(Get-Date -Format o)] Started detached MyFlix node process $($process.Id)."
+        exit 0
     }
 }

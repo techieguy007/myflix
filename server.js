@@ -215,6 +215,10 @@ process.on('uncaughtException', (error) => {
   console.error('Uncaught exception:', error);
   shutdown('uncaught exception', 1);
 });
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection:', reason);
+  shutdown('unhandled rejection', 1);
+});
 
 server = app.listen(PORT, HOST, () => {
   createDirectories();

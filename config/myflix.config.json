@@ -21,7 +21,7 @@
     "maxRequestsPerScan": 25
   },
   "service": {
-    "nodeExe": "node",
+    "nodeExe": "C:\\Program Files\\nodejs\\node.exe",
     "logDirectory": "logs",
     "openBrowserOnStart": false,
     "stopExistingOnPort": false
