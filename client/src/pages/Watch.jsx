@@ -596,6 +596,46 @@ const Watch = () => {
     videoRef.currentTime = newTime;
   };
 
+  const seekBy = useCallback((seconds) => {
+    if (!videoRef) return;
+
+    const videoDuration = Number.isFinite(videoRef.duration) ? videoRef.duration : duration;
+    const nextTime = Math.min(
+      videoDuration || Number.MAX_SAFE_INTEGER,
+      Math.max(0, videoRef.currentTime + seconds)
+    );
+
+    videoRef.currentTime = nextTime;
+    currentTimeRef.current = nextTime;
+    setCurrentTime(nextTime);
+    setShowControls(true);
+    setVideoError(null);
+  }, [duration, videoRef]);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      const target = event.target;
+      const isTyping = target && (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable
+      );
+
+      if (isTyping) return;
+
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        seekBy(30);
+      } else if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        seekBy(-10);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [seekBy]);
+
   const handleMouseMove = () => {
     setShowControls(true);
   };
