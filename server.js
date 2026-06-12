@@ -17,7 +17,11 @@ const db = require('./database/init');
 const { loadConfig } = require('./lib/config');
 const logger = require('./lib/logger');
 const { runLibraryScan } = require('./lib/libraryScanner');
-const { queuePreparedMediaForLibrary, stopAllTranscodeJobs } = require('./lib/transcoder');
+const {
+  cleanupPendingPromotedOriginals,
+  queuePreparedMediaForLibrary,
+  stopAllTranscodeJobs
+} = require('./lib/transcoder');
 
 const app = express();
 const appConfig = loadConfig();
@@ -182,6 +186,10 @@ function scheduleStartupScan() {
       .then((result) => {
         logger.info('library.startup_scan_complete', result);
         console.log('Media library scan complete:', result);
+        cleanupPendingPromotedOriginals()
+          .catch((error) => {
+            logger.error('prepared.pending_delete_cleanup_failed', { error });
+          });
         schedulePreparedMedia('startup');
       })
       .catch((error) => {
