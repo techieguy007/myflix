@@ -6,6 +6,16 @@ const fs = require('fs');
 
 const router = express.Router();
 
+function hasExistingVideoFile(movie) {
+  return Boolean(movie && movie.video_path && fs.existsSync(movie.video_path));
+}
+
+function publicMovieFields(movie) {
+  if (!movie) return movie;
+  const { video_path, ...publicMovie } = movie;
+  return publicMovie;
+}
+
 // Get all movies with optional filtering and pagination
 router.get('/', optionalAuth, async (req, res) => {
   try {
@@ -42,13 +52,15 @@ router.get('/', optionalAuth, async (req, res) => {
     const sortOrder = order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
     // Get movies with all OMDb fields
-    const movies = await db.all(
+    const movieRows = await db.all(
       `SELECT id, title, description, genre, release_year, duration, rating, director, "cast", thumbnail, created_at,
               poster_url, imdb_id, imdb_rating, plot, runtime, rated, country, language, awards, omdb_updated,
-              media_type, series_title, season_number, episode_number, episode_title, suggested_path, last_scanned_at
+              media_type, series_title, season_number, episode_number, episode_title, suggested_path, last_scanned_at,
+              video_path
        FROM movies ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
       [...queryParams, parseInt(limit), parseInt(offset)]
     );
+    const movies = movieRows.filter(hasExistingVideoFile).map(publicMovieFields);
     
 
     // Get total count for pagination
@@ -107,6 +119,10 @@ router.get('/:id', optionalAuth, async (req, res) => {
 
     if (!movie) {
       return res.status(404).json({ error: 'Movie not found' });
+    }
+
+    if (!hasExistingVideoFile(movie)) {
+      return res.status(404).json({ error: 'Video file not found' });
     }
 
     // Add user-specific data if authenticated

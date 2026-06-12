@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 const db = require('../database/init');
 const { optionalAuth, authenticateToken, requireAdmin } = require('../middleware/auth');
 const { loadConfig } = require('../lib/config');
@@ -102,6 +103,9 @@ function isAvailableForBrowse(row) {
   const latestJobStatus = String(row._conversion_job_status || '').toLowerCase();
   const latestJobReason = String(row._conversion_job_reason || '').toLowerCase();
   const hasAvailableConversion = Number(row._has_available_conversion || 0) > 0;
+  const videoPath = String(row._video_path || '');
+
+  if (!videoPath || !fs.existsSync(videoPath)) return false;
 
   if (hasAvailableConversion) return true;
   if (latestJobStatus === 'completed') return true;
