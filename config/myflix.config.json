@@ -29,8 +29,8 @@
     "prepareOnStartup": false,
     "preparedMaxStartupJobs": 0,
     "deleteOriginalAfterPrepare": true,
-    "deleteOriginalWithMultipleAudio": false,
-    "deleteOriginalWithEmbeddedSubtitles": false
+    "deleteOriginalWithMultipleAudio": true,
+    "deleteOriginalWithEmbeddedSubtitles": true
   },
   "service": {
     "nodeExe": "C:\\Program Files\\nodejs\\node.exe",
