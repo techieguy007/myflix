@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import styled from 'styled-components';
 import { FiArrowLeft, FiDownload, FiPlay, FiPause, FiMaximize2, FiSearch, FiType, FiVolume2 } from 'react-icons/fi';
 import toast from 'react-hot-toast';
@@ -436,6 +436,8 @@ const subtitleResultMeta = (result) => {
 const Watch = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const autoplayRequested = searchParams.get('autoplay') === '1';
   const [movie, setMovie] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -927,6 +929,7 @@ const Watch = () => {
       pendingSubtitleFileRef.current = null;
       setSeriesNavigation(null);
       setSelectedSeasonNumber('');
+      markPlaybackAutoResume(autoplayRequested);
 
       const movieResponse = await api.get(`/api/movies/${id}`);
       setMovie(movieResponse.data);
@@ -1261,7 +1264,7 @@ const Watch = () => {
   const handleEpisodeChange = (event) => {
     const nextEpisodeId = Number(event.target.value);
     if (!nextEpisodeId || nextEpisodeId === Number(id)) return;
-    navigate(`/watch/${nextEpisodeId}`);
+    navigate(`/watch/${nextEpisodeId}?autoplay=1`);
   };
 
   if (loading) {
@@ -1445,7 +1448,9 @@ const Watch = () => {
           }}
           controls={false}
           crossOrigin="anonymous"
-          preload="metadata"
+          preload={autoplayRequested ? 'auto' : 'metadata'}
+          autoPlay={autoplayRequested}
+          playsInline
           tabIndex="0"
         >
           {extractableSubtitleTracks.map((track) => (

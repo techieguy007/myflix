@@ -339,7 +339,7 @@ function MediaCard({ item, index, cardVariants, navigate, episode = false }) {
       initial="initial"
       animate="animate"
       transition={{ delay: Math.min(index * 0.04, 0.4) }}
-      onClick={() => navigate(`/watch/${item.id}`)}
+      onClick={() => navigate(`/watch/${item.id}?autoplay=1`)}
     >
       <Poster $thumbnail={imageUrl}>
         {!imageUrl && <span>{episode ? 'TV' : 'Movie'}</span>}
