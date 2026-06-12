@@ -1,10 +1,35 @@
 const express = require('express');
 const db = require('../database/init');
 const { optionalAuth, authenticateToken, requireAdmin } = require('../middleware/auth');
+const { loadConfig } = require('../lib/config');
 const { getScanState, runLibraryScan } = require('../lib/libraryScanner');
 const logger = require('../lib/logger');
+const { queuePreparedMediaForLibrary } = require('../lib/transcoder');
 
 const router = express.Router();
+
+async function queuePreparedMediaAfterScan(trigger) {
+  const config = loadConfig();
+  if (!config.transcoding.prepareOnStartup) {
+    logger.info('prepared.manual_queue_disabled', { trigger });
+    return;
+  }
+
+  const movies = await db.all(`
+    SELECT id, title, video_path
+    FROM movies
+    WHERE video_path IS NOT NULL
+    ORDER BY title
+  `);
+  const result = await queuePreparedMediaForLibrary(movies, {
+    reason: trigger,
+    maxJobs: Number(config.transcoding.preparedMaxStartupJobs || 0)
+  });
+  logger.info('prepared.manual_queued', {
+    trigger,
+    ...result
+  });
+}
 
 function groupEpisodes(episodes) {
   const seriesMap = new Map();
@@ -115,6 +140,14 @@ router.post('/scan/rebuild', authenticateToken, requireAdmin, async (req, res) =
       forceRescan,
       result
     });
+    queuePreparedMediaAfterScan(forceRescan ? 'manual-force' : 'manual')
+      .catch((error) => {
+        logger.error('prepared.manual_queue_failed', {
+          requestId: req.requestId,
+          userId: req.user && (req.user.userId || req.user.id),
+          error
+        });
+      });
     res.json(result);
   } catch (error) {
     logger.error('library.manual_scan_failed', {

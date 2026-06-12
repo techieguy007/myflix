@@ -90,10 +90,13 @@ During each scan MyFlix uses `ffprobe` to skip short clips when they are below `
 Browsers cannot directly play many local-library formats such as MKV, HEVC/x265, EAC3, AVI, or WMV. MyFlix checks the source container/codecs with `ffprobe` before playback:
 
 - Browser-compatible MP4/WebM files are streamed directly.
-- Incompatible files are transcoded on demand to HLS using `ffmpeg`.
-- Files with multiple audio tracks expose an audio selector in the player; changing audio reloads the HLS stream at the same timestamp.
+- Incompatible files, or files with multiple audio tracks, are prepared once into cached MP4 files under `transcodes`.
+- Prepared MP4s use H.264/AAC in an MP4 container, with H.264 video remuxed/copied when possible.
+- Playback uses the prepared MP4 direct stream when it exists.
+- HLS remains only as a fallback while a prepared MP4 is still being created.
+- Files with multiple audio tracks expose an audio selector in the player; changing audio uses a prepared MP4 for that selected track when available.
 - Embedded text subtitles are exposed in the subtitle selector and converted to cached WebVTT when selected.
-- HLS output is cached locally under `transcodes/` and ignored by Git.
+- Prepared MP4, subtitle, and fallback HLS output are cached locally under `transcodes/` and ignored by Git.
 
 Install `ffmpeg` and `ffprobe` on the server machine for this fallback to work. On Windows, MyFlix prefers the real Chocolatey package binaries under `C:\ProgramData\chocolatey\lib\ffmpeg\tools\ffmpeg\bin` so Task Manager does not show CPU-heavy Chocolatey shim wrappers.
 
@@ -105,11 +108,13 @@ The Windows service passes these transcoding settings from `config/myflix.config
   "ffprobePath": "C:\\ProgramData\\chocolatey\\lib\\ffmpeg\\tools\\ffmpeg\\bin\\ffprobe.exe",
   "ffmpegThreads": 2,
   "ffmpegPreset": "ultrafast",
-  "realtime": true
+  "realtime": true,
+  "prepareOnStartup": false,
+  "preparedMaxStartupJobs": 0
 }
 ```
 
-Use `ffmpegThreads: 1` for the lowest CPU usage. `realtime: true` keeps ffmpeg from racing through the whole movie as fast as possible.
+Use `ffmpegThreads: 1` for the lowest CPU usage. `realtime: true` only applies to fallback HLS. Prepared MP4 jobs run one at a time. By default, MyFlix prepares an incompatible file the first time you play it, then streams the cached MP4 directly after that. Set `prepareOnStartup: true` when you want to pre-warm the library in the background; `preparedMaxStartupJobs: 0` means no cap, so use a small number if you do not want login-time CPU spikes.
 
 ## Run At Windows Logon
 

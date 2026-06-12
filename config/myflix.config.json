@@ -25,7 +25,9 @@
     "ffprobePath": "C:\\ProgramData\\chocolatey\\lib\\ffmpeg\\tools\\ffmpeg\\bin\\ffprobe.exe",
     "ffmpegThreads": 2,
     "ffmpegPreset": "ultrafast",
-    "realtime": true
+    "realtime": true,
+    "prepareOnStartup": false,
+    "preparedMaxStartupJobs": 0
   },
   "service": {
     "nodeExe": "C:\\Program Files\\nodejs\\node.exe",

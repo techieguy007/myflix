@@ -1238,7 +1238,18 @@ const Watch = () => {
         )}
         {playbackInfo && playbackInfo.streamMode === 'hls' && (
           <MovieMeta>
-            <span><strong>Playback:</strong> Browser-compatible stream</span>
+            <span><strong>Playback:</strong> Preparing MP4; using fallback stream</span>
+            {playbackInfo.compatibility?.videoCodec && (
+              <span><strong>Original video:</strong> {playbackInfo.compatibility.videoCodec}</span>
+            )}
+            {playbackInfo.compatibility?.audioCodec && (
+              <span><strong>Original audio:</strong> {playbackInfo.compatibility.audioCodec}</span>
+            )}
+          </MovieMeta>
+        )}
+        {playbackInfo && playbackInfo.streamMode === 'prepared' && (
+          <MovieMeta>
+            <span><strong>Playback:</strong> Prepared MP4 direct stream</span>
             {playbackInfo.compatibility?.videoCodec && (
               <span><strong>Original video:</strong> {playbackInfo.compatibility.videoCodec}</span>
             )}

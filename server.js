@@ -13,11 +13,11 @@ const streamRoutes = require('./routes/stream');
 const uploadRoutes = require('./routes/upload');
 const libraryRoutes = require('./routes/library');
 
-require('./database/init');
+const db = require('./database/init');
 const { loadConfig } = require('./lib/config');
 const logger = require('./lib/logger');
 const { runLibraryScan } = require('./lib/libraryScanner');
-const { stopAllTranscodeJobs } = require('./lib/transcoder');
+const { queuePreparedMediaForLibrary, stopAllTranscodeJobs } = require('./lib/transcoder');
 
 const app = express();
 const appConfig = loadConfig();
@@ -182,12 +182,42 @@ function scheduleStartupScan() {
       .then((result) => {
         logger.info('library.startup_scan_complete', result);
         console.log('Media library scan complete:', result);
+        schedulePreparedMedia('startup');
       })
       .catch((error) => {
         logger.error('library.startup_scan_failed', { error });
         console.error('Media library scan failed:', error.message);
       });
   }, delay);
+}
+
+async function schedulePreparedMedia(trigger) {
+  if (!appConfig.transcoding.prepareOnStartup) {
+    logger.info('prepared.startup_disabled', { trigger });
+    return;
+  }
+
+  try {
+    const movies = await db.all(`
+      SELECT id, title, video_path
+      FROM movies
+      WHERE video_path IS NOT NULL
+      ORDER BY title
+    `);
+    const result = await queuePreparedMediaForLibrary(movies, {
+      reason: trigger,
+      maxJobs: Number(appConfig.transcoding.preparedMaxStartupJobs || 0)
+    });
+    logger.info('prepared.startup_queued', {
+      trigger,
+      ...result
+    });
+  } catch (error) {
+    logger.error('prepared.startup_queue_failed', {
+      trigger,
+      error
+    });
+  }
 }
 
 function cleanupTranscodeJobs(reason) {

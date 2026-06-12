@@ -12,6 +12,7 @@ const {
   hlsAssetPath,
   hlsContentType,
   optionsFromVariant,
+  preparedAssetPath,
   waitForFile
 } = require('../lib/transcoder');
 
@@ -121,18 +122,85 @@ async function getStreamMovie(movieId) {
   return movie;
 }
 
+function serveVideoFile(req, res, movie, videoPath, options = {}) {
+  const stat = fs.statSync(videoPath);
+  const fileSize = stat.size;
+  const range = req.headers.range;
+  const mimeType = getMimeType(videoPath);
+  const fileName = path.basename(videoPath);
+  const streamKind = options.streamKind || 'direct';
+
+  logger.info('stream.file_started', {
+    requestId: req.requestId,
+    movieId: movie.id || req.params.id,
+    title: movie.title,
+    streamKind,
+    fileName,
+    mimeType,
+    fileSize,
+    range: range || null
+  });
+
+  const onReadError = (error) => {
+    logger.error('stream.file_read_failed', {
+      requestId: req.requestId,
+      movieId: movie.id || req.params.id,
+      title: movie.title,
+      streamKind,
+      videoPath,
+      error
+    });
+  };
+
+  if (range) {
+    const parts = range.replace(/bytes=/, '').split('-');
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    const chunksize = (end - start) + 1;
+    const file = fs.createReadStream(videoPath, { start, end });
+    file.on('error', onReadError);
+
+    res.writeHead(206, {
+      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': chunksize,
+      'Content-Type': mimeType,
+      'Cache-Control': options.cacheControl || 'no-cache',
+      'Cross-Origin-Resource-Policy': 'cross-origin'
+    });
+    file.pipe(res);
+    return;
+  }
+
+  const file = fs.createReadStream(videoPath);
+  file.on('error', onReadError);
+  res.writeHead(200, {
+    'Content-Length': fileSize,
+    'Content-Type': mimeType,
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': options.cacheControl || 'no-cache',
+    'Cross-Origin-Resource-Policy': 'cross-origin'
+  });
+  file.pipe(res);
+}
+
 // Tell the client whether to direct-play or use browser-compatible HLS.
 router.get('/:id/playback', streamAuth, async (req, res) => {
   try {
     const movie = await getStreamMovie(req.params.id);
     const profile = await getPlaybackProfile(movie, selectedAudioFromQuery(req));
     const query = tokenQuery(req);
+    const directUrl = profile.streamMode === 'prepared'
+      ? `/api/stream/${movie.id}/prepared/${profile.preparedVariant}${query}`
+      : `/api/stream/${movie.id}${query}`;
     logger.info('stream.playback_profile_response', {
       requestId: req.requestId,
       movieId: movie.id,
       title: movie.title,
       streamMode: profile.streamMode,
       hlsVariant: profile.hlsVariant,
+      preparedVariant: profile.preparedVariant,
+      preparedReady: profile.preparedReady,
       directPlayable: profile.directPlayable,
       audioTracks: profile.audioTracks.length,
       subtitleTracks: profile.subtitleTracks.length,
@@ -143,7 +211,7 @@ router.get('/:id/playback', streamAuth, async (req, res) => {
       id: movie.id,
       title: movie.title,
       streamMode: profile.streamMode,
-      directUrl: `/api/stream/${movie.id}${query}`,
+      directUrl,
       hlsUrl: `/api/stream/${movie.id}/hls/${profile.hlsVariant}/index.m3u8${query}`,
       startSeconds: profile.startSeconds,
       compatibility: profile
@@ -156,6 +224,48 @@ router.get('/:id/playback', streamAuth, async (req, res) => {
     });
     console.error('Playback profile error:', error);
     res.status(error.statusCode || 500).json({ error: error.message || 'Playback profile error' });
+  }
+});
+
+// Serve prepared browser-compatible MP4 files with range support.
+router.get('/:id/prepared/:variant', streamAuth, async (req, res) => {
+  try {
+    const movie = await getStreamMovie(req.params.id);
+    const assetPath = preparedAssetPath(movie.id, movie.video_path, req.params.variant);
+
+    if (!assetPath) {
+      logger.warn('stream.prepared_invalid_asset_path', {
+        requestId: req.requestId,
+        movieId: movie.id,
+        variant: req.params.variant
+      });
+      return res.status(400).json({ error: 'Invalid prepared asset path' });
+    }
+
+    if (!fs.existsSync(assetPath)) {
+      logger.warn('stream.prepared_missing', {
+        requestId: req.requestId,
+        movieId: movie.id,
+        title: movie.title,
+        variant: req.params.variant,
+        assetPath
+      });
+      return res.status(404).json({ error: 'Prepared stream is not ready yet' });
+    }
+
+    return serveVideoFile(req, res, movie, assetPath, {
+      streamKind: 'prepared',
+      cacheControl: 'public, max-age=3600'
+    });
+  } catch (error) {
+    logger.error('stream.prepared_failed', {
+      requestId: req.requestId,
+      movieId: req.params.id,
+      variant: req.params.variant,
+      error
+    });
+    console.error('Prepared streaming error:', error);
+    return res.status(error.statusCode || 500).json({ error: error.message || 'Prepared streaming error' });
   }
 });
 
@@ -309,10 +419,6 @@ router.get('/:id', streamAuth, async (req, res) => {
     
     
 
-    const stat = fs.statSync(videoPath);
-    const fileSize = stat.size;
-    const range = req.headers.range;
-    const mimeType = getMimeType(videoPath);
     const isCompatible = isBrowserCompatible(videoPath);
     const fileName = path.basename(videoPath);
     logger.info('stream.direct_started', {
@@ -320,70 +426,11 @@ router.get('/:id', streamAuth, async (req, res) => {
       movieId,
       title: movie.title,
       fileName,
-      mimeType,
-      fileSize,
-      range: range || null,
       isCompatible
     });
     
     // Check compatibility (informational only)
-
-    if (range) {
-      // Parse range header
-      const parts = range.replace(/bytes=/, '').split('-');
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-      const chunksize = (end - start) + 1;
-
-      // Create readable stream for the requested range
-      const file = fs.createReadStream(videoPath, { start, end });
-      file.on('error', (error) => {
-        logger.error('stream.direct_read_failed', {
-          requestId: req.requestId,
-          movieId,
-          title: movie.title,
-          videoPath,
-          start,
-          end,
-          error
-        });
-      });
-
-      const head = {
-        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-        'Accept-Ranges': 'bytes',
-        'Content-Length': chunksize,
-        'Content-Type': mimeType,
-        'Cache-Control': 'no-cache',
-        'Cross-Origin-Resource-Policy': 'cross-origin'
-      };
-
-      res.writeHead(206, head);
-      file.pipe(res);
-    } else {
-      // No range requested, send entire file
-      const file = fs.createReadStream(videoPath);
-      file.on('error', (error) => {
-        logger.error('stream.direct_read_failed', {
-          requestId: req.requestId,
-          movieId,
-          title: movie.title,
-          videoPath,
-          error
-        });
-      });
-
-      const head = {
-        'Content-Length': fileSize,
-        'Content-Type': mimeType,
-        'Accept-Ranges': 'bytes',
-        'Cache-Control': 'no-cache',
-        'Cross-Origin-Resource-Policy': 'cross-origin'
-      };
-
-      res.writeHead(200, head);
-      file.pipe(res);
-    }
+    serveVideoFile(req, res, { ...movie, id: movieId }, videoPath, { streamKind: 'original' });
 
     // Log viewing (optional, for analytics)
     if (req.user) {
