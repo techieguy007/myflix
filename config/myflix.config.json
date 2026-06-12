@@ -10,6 +10,7 @@
     "autoScanOnStart": true,
     "scanDelayMs": 2500,
     "minFileSizeMB": 1,
+    "minDurationMinutes": 15,
     "renameMode": "suggest"
   },
   "metadata": {

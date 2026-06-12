@@ -25,6 +25,7 @@ Important settings:
 - `media.root`: media folder to scan, default `D:\movies`
 - `media.autoScanOnStart`: rebuilds the index whenever MyFlix starts
 - `media.renameMode`: `suggest` by default; use `apply` only when you want MyFlix to move/rename files
+- `media.minDurationMinutes`: ignores movie and TV video files shorter than this, default `15`
 - `metadata.omdbApiKeys`: set one or more OMDb keys; MyFlix will try the next key if the first is invalid or rate-limited
 - `metadata.omdbApiKey`: single-key fallback for older configs
 - `OMDB_API_KEYS`: optional comma-separated environment variable for OMDb keys
@@ -73,6 +74,8 @@ Movies/<Movie Name> (2024)/<Movie Name> (2024).mkv
 ```
 
 By default MyFlix only stores these clean target names as suggestions in SQLite. It does not rename or move your files unless `media.renameMode` is changed to `apply`.
+
+During each scan MyFlix uses `ffprobe` to skip short clips when they are below `media.minDurationMinutes`. It also ignores common extras folders and files such as `Featurettes`, `Deleted Scenes`, `Trailers`, samples, audition footage, and bonus features, then collapses scanner-created duplicates by keeping the longer or larger copy in the index.
 
 ## Browser Playback Compatibility
 
