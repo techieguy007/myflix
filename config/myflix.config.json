@@ -1,0 +1,27 @@
+{
+  "taskName": "MyFlixLocalStreaming",
+  "server": {
+    "host": "0.0.0.0",
+    "port": 5000,
+    "nodeEnv": "production"
+  },
+  "media": {
+    "root": "D:\\movies",
+    "autoScanOnStart": true,
+    "scanDelayMs": 2500,
+    "minFileSizeMB": 1,
+    "renameMode": "suggest"
+  },
+  "metadata": {
+    "provider": "omdb",
+    "enabled": true,
+    "omdbApiKey": "",
+    "maxRequestsPerScan": 25
+  },
+  "service": {
+    "nodeExe": "node",
+    "logDirectory": "logs",
+    "openBrowserOnStart": false,
+    "stopExistingOnPort": false
+  }
+}

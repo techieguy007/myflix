@@ -43,8 +43,9 @@ router.get('/', optionalAuth, async (req, res) => {
 
     // Get movies with all OMDb fields
     const movies = await db.all(
-      `SELECT id, title, description, genre, release_year, duration, rating, director, "cast", thumbnail, created_at, 
-              poster_url, imdb_id, imdb_rating, plot, runtime, rated, country, language, awards, omdb_updated 
+      `SELECT id, title, description, genre, release_year, duration, rating, director, "cast", thumbnail, created_at,
+              poster_url, imdb_id, imdb_rating, plot, runtime, rated, country, language, awards, omdb_updated,
+              media_type, series_title, season_number, episode_number, episode_title, suggested_path, last_scanned_at
        FROM movies ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
       [...queryParams, parseInt(limit), parseInt(offset)]
     );

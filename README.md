@@ -4,6 +4,107 @@ A complete n**flix-inspired streaming platform built for your home network. Buil
 
 ![MyFlix Dashboard](https://via.placeholder.com/800x400/e50914/ffffff?text=MyFlix+Dashboard)
 
+## Local Library Mode
+
+MyFlix can index your existing media library instead of requiring uploads.
+
+Default media folder:
+
+```text
+D:\movies
+```
+
+Config file:
+
+```text
+config/myflix.config.json
+```
+
+Important settings:
+
+- `media.root`: media folder to scan, default `D:\movies`
+- `media.autoScanOnStart`: rebuilds the index whenever MyFlix starts
+- `media.renameMode`: `suggest` by default; use `apply` only when you want MyFlix to move/rename files
+- `metadata.omdbApiKey`: set this or the `OMDB_API_KEY` environment variable to fetch movie/episode metadata from OMDb
+- `server.host`: `0.0.0.0` allows access from other devices on your local network
+- `server.port`: default `5000`
+
+Manual scan:
+
+```powershell
+npm run scan-library
+```
+
+The scanner detects movies, `S01E02` style TV episodes, and season folders such as:
+
+```text
+Show Name\Season 01\Episode 02.mkv
+```
+
+TV episodes are indexed as seasons and episodes:
+
+```text
+TV Shows/<Show Name>/Season 01/<Show Name> - S01E02 - <Episode Title>.mkv
+```
+
+Movie rename suggestions are indexed as:
+
+```text
+Movies/<Movie Name> (2024)/<Movie Name> (2024).mkv
+```
+
+By default MyFlix only stores these clean target names as suggestions in SQLite. It does not rename or move your files unless `media.renameMode` is changed to `apply`.
+
+## Run At Windows Logon
+
+Install dependencies before registering the startup task:
+
+```powershell
+npm install
+npm run build
+```
+
+The service script auto-detects Node.js from PATH, `%APPDATA%\npm\node.cmd`, or standard Node install locations. If Node is installed somewhere else, set `service.nodeExe` in `config/myflix.config.json` to the full path.
+
+Install MyFlix as a current-user Windows logon task:
+
+```powershell
+.\service\myflix-service.ps1 -Action install
+```
+
+Start it now:
+
+```powershell
+.\service\myflix-service.ps1 -Action start
+```
+
+Check status:
+
+```powershell
+.\service\myflix-service.ps1 -Action status
+```
+
+Stop or remove it:
+
+```powershell
+.\service\myflix-service.ps1 -Action stop
+.\service\myflix-service.ps1 -Action uninstall
+```
+
+The task runs hidden in the background, rebuilds the media index on startup, and writes logs to:
+
+```text
+logs/
+```
+
+With the default config, open MyFlix locally at:
+
+```text
+http://127.0.0.1:5000/
+```
+
+For another device on the same network, use the host machine's LAN IP with port `5000`.
+
 ## ✨ Features
 
 ### 🎥 Core Streaming Features

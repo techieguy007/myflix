@@ -217,6 +217,13 @@ const formatTime = (seconds) => {
   }
 };
 
+const episodeHeading = (movie) => {
+  if (movie.media_type !== 'episode') return movie.title;
+  const season = String(movie.season_number || 1).padStart(2, '0');
+  const episode = String(movie.episode_number || 1).padStart(2, '0');
+  return `${movie.series_title || 'TV Show'} - S${season}E${episode} - ${movie.episode_title || movie.title}`;
+};
+
 const Watch = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -639,8 +646,9 @@ const Watch = () => {
       </VideoContainer>
 
       <MovieInfo>
-        <MovieTitle>{movie.title}</MovieTitle>
+        <MovieTitle>{episodeHeading(movie)}</MovieTitle>
         <MovieMeta>
+          {movie.media_type === 'episode' && movie.series_title && <span>{movie.series_title}</span>}
           {movie.release_year && <span>{movie.release_year}</span>}
           {movie.genre && <span>{movie.genre}</span>}
           {movie.duration && <span>{Math.floor(movie.duration / 60)} min</span>}
@@ -664,4 +672,4 @@ const Watch = () => {
   );
 };
 
-export default Watch; 
+export default Watch;

@@ -14,7 +14,8 @@
     "setup": "node install.js",
     "reset-db": "node reset-db.js",
     "seed-demo": "node seed-demo-data.js",
-    "test-auth": "node test-auth.js"
+    "test-auth": "node test-auth.js",
+    "scan-library": "node scripts/scan-library.js"
   },
   "keywords": [
     "netflix",

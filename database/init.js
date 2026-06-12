@@ -78,6 +78,17 @@ function initializeTables() {
         language TEXT,
         awards TEXT,
         omdb_updated DATETIME,
+        media_type TEXT DEFAULT 'movie',
+        series_title TEXT,
+        season_number INTEGER,
+        episode_number INTEGER,
+        episode_title TEXT,
+        library_root TEXT,
+        library_source TEXT DEFAULT 'manual',
+        original_path TEXT,
+        suggested_path TEXT,
+        last_scanned_at DATETIME,
+        metadata_source TEXT,
         FOREIGN KEY (uploaded_by) REFERENCES users (id)
       )
     `, (err) => {
@@ -97,7 +108,18 @@ function initializeTables() {
           'country TEXT',
           'language TEXT',
           'awards TEXT',
-          'omdb_updated DATETIME'
+          'omdb_updated DATETIME',
+          "media_type TEXT DEFAULT 'movie'",
+          'series_title TEXT',
+          'season_number INTEGER',
+          'episode_number INTEGER',
+          'episode_title TEXT',
+          'library_root TEXT',
+          "library_source TEXT DEFAULT 'manual'",
+          'original_path TEXT',
+          'suggested_path TEXT',
+          'last_scanned_at DATETIME',
+          'metadata_source TEXT'
         ];
         
         newColumns.forEach(column => {
@@ -345,6 +367,11 @@ const dbMethods = {
 
 // Auto-seed demo data if database is empty (for fresh deployments)
 function checkAndAutoSeedDemoData() {
+  if (process.env.MYFLIX_DISABLE_DEMO_SEED === 'true') {
+    console.log('Demo data auto-seed disabled by MYFLIX_DISABLE_DEMO_SEED=true');
+    return;
+  }
+
   // Check if database has any movies
   db.get('SELECT COUNT(*) as count FROM movies', (err, row) => {
     if (err) {
@@ -392,4 +419,4 @@ process.on('SIGINT', async () => {
   }
 });
 
-module.exports = dbMethods; 
+module.exports = dbMethods;
