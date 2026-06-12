@@ -22,7 +22,7 @@ const logger = require('./lib/logger');
 const { runLibraryScan } = require('./lib/libraryScanner');
 const {
   cleanupPendingPromotedOriginals,
-  queuePreparedMediaForLibrary,
+  queueBackgroundConversionsForLibrary,
   startBackgroundConversionQueue,
   stopAllTranscodeJobs
 } = require('./lib/transcoder');
@@ -266,27 +266,22 @@ function scheduleStartupScan() {
 
 async function schedulePreparedMedia(trigger) {
   if (!appConfig.transcoding.prepareOnStartup) {
-    logger.info('prepared.startup_disabled', { trigger });
+    logger.info('background_conversion.startup_disabled', { trigger });
     return;
   }
 
   try {
-    const movies = await db.all(`
-      SELECT id, title, video_path
-      FROM movies
-      WHERE video_path IS NOT NULL
-      ORDER BY title
-    `);
-    const result = await queuePreparedMediaForLibrary(movies, {
+    const result = await queueBackgroundConversionsForLibrary({
       reason: trigger,
       maxJobs: Number(appConfig.transcoding.preparedMaxStartupJobs || 0)
     });
-    logger.info('prepared.startup_queued', {
+    await startBackgroundConversionQueue(trigger);
+    logger.info('background_conversion.startup_queued', {
       trigger,
       ...result
     });
   } catch (error) {
-    logger.error('prepared.startup_queue_failed', {
+    logger.error('background_conversion.startup_queue_failed', {
       trigger,
       error
     });

@@ -134,22 +134,22 @@ By default MyFlix only stores these clean target names as suggestions in SQLite.
 
 During each scan MyFlix uses `ffprobe` to skip short clips when they are below `media.minDurationMinutes`. It also ignores common extras folders and files such as `Featurettes`, `Deleted Scenes`, `Trailers`, samples, audition footage, and bonus features, then collapses scanner-created duplicates by keeping the longer or larger copy in the index.
 
-## Browser Playback Compatibility
+## Device-Safe Playback Compatibility
 
-Browsers cannot directly play many local-library formats such as MKV, HEVC/x265, EAC3, AVI, or WMV. MyFlix checks the source container/codecs with `ffprobe` before playback:
+Browsers, TVs, and mobile devices do not agree on local-library formats such as MKV, HEVC/x265, EAC3, AVI, WMV, or even some MP4 variants. MyFlix standardizes the library into seekable MP4 files that work broadly across devices:
 
-- Browser-compatible MP4/WebM files are streamed directly.
-- Incompatible files, or files with multiple audio tracks, are prepared once into cached MP4 files under `transcodes`.
-- Prepared MP4s use H.264/AAC in an MP4 container, with H.264 video remuxed/copied when possible.
-- Playback uses the prepared MP4 direct stream when it exists.
+- Background conversion targets MP4 with H.264 video, AAC stereo audio, `yuv420p`, and fast-start metadata.
+- The converter runs one file at a time, prefers `h264_nvenc` GPU encoding when available, and falls back to `libx264`.
+- The selected audio track prefers Hindi, then English, then the source default.
+- Playback uses a direct MP4 stream with HTTP range support when the converted file exists.
+- Mobile playback waits for a seekable MP4 instead of relying on live fallback transcoding.
 - If original deletion is enabled, the prepared MP4 is promoted into the movie folder and becomes the tracked library file.
-- HLS remains only as a fallback while a prepared MP4 is still being created.
-- Files with multiple audio tracks expose an audio selector in the player; changing audio uses a prepared MP4 for that selected track when available.
+- Files with multiple audio tracks expose an audio selector in the player; choosing another track prepares a matching MP4 variant when available.
 - Embedded text subtitles are exposed in the subtitle selector and converted to cached WebVTT when selected.
 - The subtitle selector can search OpenSubtitles by movie hash, filename/title, IMDb ID, and season/episode metadata, then download the selected subtitle as a WebVTT sidecar next to the video.
-- Prepared MP4, subtitle, and fallback HLS output are cached locally under `transcodes/` and ignored by Git.
+- Prepared MP4, subtitle, and legacy fallback output are cached locally under `transcodes/` and ignored by Git.
 
-Install `ffmpeg` and `ffprobe` on the server machine for this fallback to work. On Windows, MyFlix prefers the real Chocolatey package binaries under `C:\ProgramData\chocolatey\lib\ffmpeg\tools\ffmpeg\bin` so Task Manager does not show CPU-heavy Chocolatey shim wrappers.
+Install `ffmpeg` and `ffprobe` on the server machine for conversion to work. On Windows, MyFlix prefers the real Chocolatey package binaries under `C:\ProgramData\chocolatey\lib\ffmpeg\tools\ffmpeg\bin` so Task Manager does not show CPU-heavy Chocolatey shim wrappers.
 
 The Windows service passes these transcoding settings from `config/myflix.config.json`:
 
@@ -163,14 +163,14 @@ The Windows service passes these transcoding settings from `config/myflix.config
   "prepareOnStartup": false,
   "preparedMaxStartupJobs": 0,
   "deleteOriginalAfterPrepare": true,
-  "deleteOriginalWithMultipleAudio": false,
-  "deleteOriginalWithEmbeddedSubtitles": false
+  "deleteOriginalWithMultipleAudio": true,
+  "deleteOriginalWithEmbeddedSubtitles": true
 }
 ```
 
-Use `ffmpegThreads: 1` for the lowest CPU usage. `realtime: true` only applies to fallback HLS. Prepared MP4 jobs run one at a time. By default, MyFlix prepares an incompatible file the first time you play it, then streams the cached MP4 directly after that. Set `prepareOnStartup: true` when you want to pre-warm the library in the background; `preparedMaxStartupJobs: 0` means no cap, so use a small number if you do not want login-time CPU spikes.
+Use `ffmpegThreads: 1` for the lowest CPU usage. Prepared MP4 jobs run one at a time. Click `Convert All to Universal MP4` in Admin > Conversions to queue the whole library. Set `prepareOnStartup: true` when you want the service to continue queuing universal MP4 conversion after startup scans; `preparedMaxStartupJobs: 0` means no cap, so use a small number if you do not want login-time CPU spikes.
 
-When `deleteOriginalAfterPrepare` is enabled, a successfully prepared MP4 is copied next to the original file, the database is updated to point at that MP4, and then the old source file is deleted with retries. MyFlix does not delete originals with multiple audio tracks or extractable embedded text subtitles unless you explicitly enable the matching override, so alternate audio/subtitle choices are not silently lost.
+When `deleteOriginalAfterPrepare` is enabled, a successfully prepared MP4 is copied next to the original file, the database is updated to point at that MP4, and then the old source file is deleted with retries. With the default config in this repo, originals with multiple audio tracks or embedded subtitles are also deleted after successful conversion; subtitle sidecars are extracted when possible before deletion.
 
 ## OpenSubtitles Downloads
 

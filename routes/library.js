@@ -10,7 +10,6 @@ const {
   getBackgroundConversionQueueState,
   queueBackgroundConversionsForLibrary,
   queueBackgroundConversionsForMovieIds,
-  queuePreparedMediaForLibrary,
   setBackgroundConversionPaused,
   startBackgroundConversionQueue
 } = require('../lib/transcoder');
@@ -23,21 +22,16 @@ const BROWSER_FORMATS = new Set(['mp4', 'm4v', 'webm', 'ogg', 'ogv']);
 async function queuePreparedMediaAfterScan(trigger) {
   const config = loadConfig();
   if (!config.transcoding.prepareOnStartup) {
-    logger.info('prepared.manual_queue_disabled', { trigger });
+    logger.info('background_conversion.manual_queue_disabled', { trigger });
     return;
   }
 
-  const movies = await db.all(`
-    SELECT id, title, video_path
-    FROM movies
-    WHERE video_path IS NOT NULL
-    ORDER BY title
-  `);
-  const result = await queuePreparedMediaForLibrary(movies, {
+  const result = await queueBackgroundConversionsForLibrary({
     reason: trigger,
     maxJobs: Number(config.transcoding.preparedMaxStartupJobs || 0)
   });
-  logger.info('prepared.manual_queued', {
+  await startBackgroundConversionQueue(trigger);
+  logger.info('background_conversion.manual_queued', {
     trigger,
     ...result
   });
@@ -110,6 +104,7 @@ function isAvailableForBrowse(row) {
   if (hasAvailableConversion) return true;
   if (latestJobStatus === 'completed') return true;
   if (latestJobStatus === 'skipped' && latestJobReason.includes('already browser compatible')) return true;
+  if (latestJobStatus === 'skipped' && latestJobReason.includes('already device-safe')) return true;
   if (['queued', 'running', 'failed'].includes(latestJobStatus)) return false;
 
   return isLikelyBrowserContainer(row);
