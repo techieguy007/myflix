@@ -3,9 +3,21 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('../database/init');
 const { authenticateToken } = require('../middleware/auth');
+const { loadConfig } = require('../lib/config');
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';
+const appConfig = loadConfig();
+const sessionDays = Math.max(1, Number(appConfig.auth?.sessionDays || 180));
+const tokenExpiresIn = `${sessionDays}d`;
+
+function signSessionToken(user) {
+  return jwt.sign(
+    { userId: user.id, username: user.username, email: user.email },
+    JWT_SECRET,
+    { expiresIn: tokenExpiresIn }
+  );
+}
 
 // Register new user
 router.post('/register', async (req, res) => {
@@ -41,11 +53,7 @@ router.post('/register', async (req, res) => {
     );
 
     // Generate JWT token
-    const token = jwt.sign(
-      { userId: result.id, username, email },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    );
+    const token = signSessionToken({ id: result.id, username, email });
 
     res.status(201).json({
       message: 'User registered successfully',
@@ -90,11 +98,7 @@ router.post('/login', async (req, res) => {
     }
 
     // Generate JWT token
-    const token = jwt.sign(
-      { userId: user.id, username: user.username, email: user.email },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    );
+    const token = signSessionToken(user);
 
     res.json({
       message: 'Login successful',
@@ -247,11 +251,7 @@ router.post('/refresh', authenticateToken, async (req, res) => {
     }
 
     // Generate new token
-    const token = jwt.sign(
-      { userId: user.id, username: user.username, email: user.email },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    );
+    const token = signSessionToken(user);
 
     res.json({ token });
 
@@ -266,4 +266,4 @@ router.post('/logout', authenticateToken, (req, res) => {
   res.json({ message: 'Logout successful' });
 });
 
-module.exports = router; 
+module.exports = router;

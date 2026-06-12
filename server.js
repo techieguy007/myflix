@@ -1,6 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const http = require('http');
+const https = require('https');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -29,8 +31,10 @@ const appConfig = loadConfig();
 const PORT = appConfig.server.port || 5000;
 const HOST = appConfig.server.host || '0.0.0.0';
 let server = null;
+let redirectServer = null;
 let startupScanTimer = null;
 let shuttingDown = false;
+let startupWorkStarted = false;
 
 app.use(helmet({
   crossOriginEmbedderPolicy: false,
@@ -157,15 +161,72 @@ function createDirectories() {
   });
 }
 
-function localNetworkUrls(port) {
-  const urls = [`http://localhost:${port}`];
+function localNetworkUrls(port, protocol = 'http') {
+  const urls = [`${protocol}://localhost:${port}`];
   const interfaces = os.networkInterfaces();
   Object.values(interfaces).flat().forEach((entry) => {
     if (entry && entry.family === 'IPv4' && !entry.internal) {
-      urls.push(`http://${entry.address}:${port}`);
+      urls.push(`${protocol}://${entry.address}:${port}`);
     }
   });
   return urls;
+}
+
+function resolveAppPath(value) {
+  if (!value) return '';
+  return path.isAbsolute(value) ? value : path.join(__dirname, value);
+}
+
+function readHttpsOptions() {
+  const httpsConfig = appConfig.server.https || {};
+  if (!httpsConfig.enabled) {
+    return null;
+  }
+
+  const keyPath = resolveAppPath(httpsConfig.keyPath);
+  const certPath = resolveAppPath(httpsConfig.certPath);
+  const pfxPath = resolveAppPath(httpsConfig.pfxPath);
+  const caPath = resolveAppPath(httpsConfig.caPath);
+  const hasPfx = pfxPath && fs.existsSync(pfxPath);
+  const hasPemPair = keyPath && certPath && fs.existsSync(keyPath) && fs.existsSync(certPath);
+  if (!hasPfx && !hasPemPair) {
+    logger.error('https.certificate_missing', { keyPath, certPath, pfxPath });
+    throw new Error('HTTPS is enabled but pfxPath or keyPath/certPath is missing or invalid.');
+  }
+
+  const options = hasPfx
+    ? {
+      pfx: fs.readFileSync(pfxPath),
+      passphrase: httpsConfig.passphrase || undefined
+    }
+    : {
+      key: fs.readFileSync(keyPath),
+      cert: fs.readFileSync(certPath)
+    };
+  if (caPath && fs.existsSync(caPath)) {
+    options.ca = fs.readFileSync(caPath);
+  }
+  return {
+    options,
+    keyPath: hasPemPair ? keyPath : null,
+    certPath: hasPemPair ? certPath : null,
+    pfxPath: hasPfx ? pfxPath : null,
+    caPath: caPath || null,
+    port: Number(httpsConfig.port || PORT),
+    redirectHttp: httpsConfig.redirectHttp !== false
+  };
+}
+
+function redirectToHttpsServer(httpsPort) {
+  return http.createServer((req, res) => {
+    const hostHeader = String(req.headers.host || `localhost:${PORT}`).replace(/:\d+$/, '');
+    const target = `https://${hostHeader}:${httpsPort}${req.url || '/'}`;
+    res.writeHead(308, {
+      Location: target,
+      'Cache-Control': 'no-store'
+    });
+    res.end(`Redirecting to ${target}`);
+  });
 }
 
 function scheduleStartupScan() {
@@ -257,8 +318,16 @@ function shutdown(reason, exitCode = 0) {
   }
 
   server.close(() => {
-    logger.warn('server.shutdown_complete', { reason, exitCode });
-    process.exit(exitCode);
+    if (!redirectServer) {
+      logger.warn('server.shutdown_complete', { reason, exitCode });
+      process.exit(exitCode);
+      return;
+    }
+
+    redirectServer.close(() => {
+      logger.warn('server.shutdown_complete', { reason, exitCode });
+      process.exit(exitCode);
+    });
   });
 
   setTimeout(() => {
@@ -285,28 +354,66 @@ process.on('unhandledRejection', (reason) => {
   shutdown('unhandled rejection', 1);
 });
 
-server = app.listen(PORT, HOST, () => {
+function startStartupWork() {
+  if (startupWorkStarted) return;
+  startupWorkStarted = true;
+
   createDirectories();
-  logger.info('server.started', {
-    bindHost: HOST,
-    port: PORT,
-    nodeEnv: process.env.NODE_ENV,
-    logFile: logger.LOG_FILE,
-    mediaRoot: appConfig.media.root,
-    autoScanOnStart: appConfig.media.autoScanOnStart,
-    urls: localNetworkUrls(PORT)
-  });
-  console.log(`MyFlix server running on ${HOST}:${PORT}`);
-  console.log('Access MyFlix at:');
-  localNetworkUrls(PORT).forEach((url) => console.log(`  ${url}`));
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('Development mode - Frontend running at: http://localhost:3000');
-  }
   startBackgroundConversionQueue('startup')
     .catch((error) => {
       logger.error('background_conversion.startup_resume_failed', { error });
     });
   scheduleStartupScan();
-});
+}
+
+function onServerStarted(protocol, port, extra = {}) {
+  const urls = localNetworkUrls(port, protocol);
+  logger.info('server.started', {
+    bindHost: HOST,
+    port,
+    protocol,
+    nodeEnv: process.env.NODE_ENV,
+    logFile: logger.LOG_FILE,
+    mediaRoot: appConfig.media.root,
+    autoScanOnStart: appConfig.media.autoScanOnStart,
+    urls,
+    ...extra
+  });
+  console.log(`MyFlix ${protocol.toUpperCase()} server running on ${HOST}:${port}`);
+  console.log('Access MyFlix at:');
+  urls.forEach((url) => console.log(`  ${url}`));
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('Development mode - Frontend running at: http://localhost:3000');
+  }
+  startStartupWork();
+}
+
+const httpsRuntime = readHttpsOptions();
+if (httpsRuntime) {
+  server = https.createServer(httpsRuntime.options, app).listen(httpsRuntime.port, HOST, () => {
+    onServerStarted('https', httpsRuntime.port, {
+      keyPath: httpsRuntime.keyPath,
+      certPath: httpsRuntime.certPath,
+      pfxPath: httpsRuntime.pfxPath,
+      caPath: httpsRuntime.caPath
+    });
+  });
+
+  if (httpsRuntime.redirectHttp && httpsRuntime.port !== PORT) {
+    redirectServer = redirectToHttpsServer(httpsRuntime.port).listen(PORT, HOST, () => {
+      logger.info('server.http_redirect_started', {
+        bindHost: HOST,
+        port: PORT,
+        httpsPort: httpsRuntime.port,
+        urls: localNetworkUrls(PORT, 'http')
+      });
+      console.log(`MyFlix HTTP redirect running on ${HOST}:${PORT}`);
+    });
+  }
+} else {
+  server = app.listen(PORT, HOST, () => {
+    onServerStarted('http', PORT);
+  });
+}
 
 module.exports = app;

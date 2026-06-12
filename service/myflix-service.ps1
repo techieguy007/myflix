@@ -41,6 +41,41 @@ function Resolve-ServicePath {
     return Join-Path $BaseDirectory $PathValue
 }
 
+function Merge-ConfigObject {
+    param([object]$Base, [object]$Override)
+    if ($null -eq $Override) {
+        return $Base
+    }
+    if ($null -eq $Base) {
+        return $Override
+    }
+
+    foreach ($property in $Override.PSObject.Properties) {
+        $existing = $Base.PSObject.Properties[$property.Name]
+        $value = $property.Value
+        if ($existing -and $existing.Value -is [pscustomobject] -and $value -is [pscustomobject]) {
+            Merge-ConfigObject $existing.Value $value | Out-Null
+        } elseif ($existing) {
+            $existing.Value = $value
+        } else {
+            $Base | Add-Member -MemberType NoteProperty -Name $property.Name -Value $value
+        }
+    }
+
+    return $Base
+}
+
+function Get-LocalConfigPath {
+    param([string]$ResolvedConfigPath)
+    $directory = Split-Path -Parent $ResolvedConfigPath
+    $extension = [System.IO.Path]::GetExtension($ResolvedConfigPath)
+    if ([string]::IsNullOrWhiteSpace($extension)) {
+        $extension = ".json"
+    }
+    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($ResolvedConfigPath) -replace "\.config$", ""
+    return Join-Path $directory "$baseName.local$extension"
+}
+
 function Resolve-NodeExecutable {
     param([string]$NodeExe)
     if ([string]::IsNullOrWhiteSpace($NodeExe)) {
@@ -84,17 +119,34 @@ function Get-MyFlixConfig {
     if (-not (Test-Path -LiteralPath $ResolvedConfigPath)) {
         throw "Config file not found: $ResolvedConfigPath"
     }
-    return Get-Content -LiteralPath $ResolvedConfigPath -Raw | ConvertFrom-Json
+    $config = Get-Content -LiteralPath $ResolvedConfigPath -Raw | ConvertFrom-Json
+    $localConfigPath = Get-LocalConfigPath $ResolvedConfigPath
+    if (Test-Path -LiteralPath $localConfigPath) {
+        $localConfig = Get-Content -LiteralPath $localConfigPath -Raw | ConvertFrom-Json
+        $config = Merge-ConfigObject $config $localConfig
+    }
+    return $config
 }
 
 function Get-Runtime {
     param([object]$Config, [string]$RepoDir)
     $hostName = [string](Get-NestedValue $Config "server" "host" "0.0.0.0")
     $port = [int](Get-NestedValue $Config "server" "port" 5000)
+    $httpsConfig = Get-NestedValue $Config "server" "https" $null
+    $httpsEnabled = $false
+    $httpsPort = 5443
+    if ($null -ne $httpsConfig) {
+        $httpsEnabled = [bool](Get-ConfigValue $httpsConfig "enabled" $false)
+        $httpsPort = [int](Get-ConfigValue $httpsConfig "port" 5443)
+    }
+    $urlPort = if ($httpsEnabled) { $httpsPort } else { $port }
+    $protocol = if ($httpsEnabled) { "https" } else { "http" }
     return [pscustomobject]@{
         Host = $hostName
         Port = $port
-        Url = if ($hostName -eq "0.0.0.0") { "http://127.0.0.1:$port/" } else { "http://$($hostName):$port/" }
+        HttpsEnabled = $httpsEnabled
+        HttpsPort = $httpsPort
+        Url = if ($hostName -eq "0.0.0.0") { "${protocol}://127.0.0.1:$urlPort/" } else { "${protocol}://$($hostName):$urlPort/" }
         NodeExe = Resolve-NodeExecutable ([string](Get-NestedValue $Config "service" "nodeExe" "node"))
         LogDirectory = Resolve-ServicePath ([string](Get-NestedValue $Config "service" "logDirectory" "logs")) $RepoDir
         LogLevel = [string](Get-NestedValue $Config "service" "logLevel" "info")
@@ -132,6 +184,24 @@ function Get-MyFlixListeners {
     return $rows
 }
 
+function Get-RuntimePorts {
+    param([object]$Runtime)
+    $ports = @($Runtime.Port)
+    if ($Runtime.HttpsEnabled) {
+        $ports += $Runtime.HttpsPort
+    }
+    return ($ports | Sort-Object -Unique)
+}
+
+function Get-MyFlixRuntimeListeners {
+    param([object]$Runtime, [string]$ServerPath)
+    $listeners = @()
+    foreach ($port in (Get-RuntimePorts $Runtime)) {
+        $listeners += Get-MyFlixListeners $port $ServerPath
+    }
+    return $listeners
+}
+
 function Get-AppReadinessErrors {
     param([string]$RepoDir, [object]$Runtime)
     $errors = @()
@@ -167,9 +237,10 @@ function Show-TaskStatus {
     Write-Output "MyFlix URL: $($Runtime.Url)"
     Write-Output "Log directory: $($Runtime.LogDirectory)"
     Write-Output "Log level: $($Runtime.LogLevel)"
-    $listeners = Get-MyFlixListeners $Runtime.Port $ServerPath
+    $ports = Get-RuntimePorts $Runtime
+    $listeners = Get-MyFlixRuntimeListeners $Runtime $ServerPath
     if (-not $listeners) {
-        Write-Output "No listener on port $($Runtime.Port)."
+        Write-Output "No listener on port(s) $(($ports | Sort-Object -Unique) -join ', ')."
         return
     }
     $listeners | Select-Object Port, ProcessId, ProcessName, IsMyFlix | Format-Table -AutoSize
@@ -177,14 +248,14 @@ function Show-TaskStatus {
 
 function Stop-MyFlixListeners {
     param([object]$Runtime, [string]$ServerPath)
-    $listeners = Get-MyFlixListeners $Runtime.Port $ServerPath
+    $listeners = Get-MyFlixRuntimeListeners $Runtime $ServerPath
     foreach ($listener in ($listeners | Sort-Object ProcessId -Unique)) {
         if (-not $listener.IsMyFlix) {
-            Write-Warning "Skipping process $($listener.ProcessId) on port $($Runtime.Port) because it does not look like MyFlix."
+            Write-Warning "Skipping process $($listener.ProcessId) on port $($listener.Port) because it does not look like MyFlix."
             continue
         }
         Stop-Process -Id $listener.ProcessId -Force
-        Write-Output "Stopped MyFlix process $($listener.ProcessId) on port $($Runtime.Port)."
+        Write-Output "Stopped MyFlix process $($listener.ProcessId)."
     }
 }
 
@@ -267,7 +338,7 @@ switch ($Action) {
     }
 
     "start" {
-        $existing = Get-MyFlixListeners $Runtime.Port $ServerPath | Where-Object { $_.IsMyFlix }
+        $existing = Get-MyFlixRuntimeListeners $Runtime $ServerPath | Where-Object { $_.IsMyFlix }
         if ($existing) {
             Write-Output "MyFlix is already running at $($Runtime.Url)."
             Show-TaskStatus $TaskName $Runtime $ServerPath
@@ -301,11 +372,12 @@ switch ($Action) {
         $outLog = Join-Path $Runtime.LogDirectory "myflix-service.out.log"
         $errLog = Join-Path $Runtime.LogDirectory "myflix-service.err.log"
 
-        $listeners = Get-NetTCPConnection -LocalPort $Runtime.Port -State Listen -ErrorAction SilentlyContinue
+        $listeners = Get-NetTCPConnection -LocalPort (Get-RuntimePorts $Runtime) -State Listen -ErrorAction SilentlyContinue
         if ($listeners) {
             if (-not $Runtime.StopExistingOnPort) {
                 $owners = ($listeners | Select-Object -ExpandProperty OwningProcess -Unique) -join ", "
-                throw "Port $($Runtime.Port) is already in use by process id(s): $owners. Change config port or set stopExistingOnPort to true."
+                $ports = (($listeners | Select-Object -ExpandProperty LocalPort -Unique) | Sort-Object) -join ", "
+                throw "Port(s) $ports are already in use by process id(s): $owners. Change config port or set stopExistingOnPort to true."
             }
             foreach ($owner in ($listeners | Select-Object -ExpandProperty OwningProcess -Unique)) {
                 Stop-Process -Id $owner -Force

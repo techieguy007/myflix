@@ -27,6 +27,15 @@ export const AuthProvider = ({ children }) => {
       // Validate token by fetching user profile
       const response = await api.get('/api/auth/profile');
       setUser(response.data);
+
+      try {
+        const refreshResponse = await api.post('/api/auth/refresh');
+        if (refreshResponse.data?.token) {
+          localStorage.setItem('authToken', refreshResponse.data.token);
+        }
+      } catch (refreshError) {
+        console.warn('Session refresh failed; keeping current valid token:', refreshError);
+      }
     } catch (error) {
       console.error('Auth check failed:', error);
       localStorage.removeItem('authToken');
@@ -130,4 +139,4 @@ export const AuthProvider = ({ children }) => {
       {children}
     </AuthContext.Provider>
   );
-}; 
+};

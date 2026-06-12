@@ -51,6 +51,45 @@ Example:
 }
 ```
 
+## Local HTTPS And Persistent Login
+
+For a local-network HTTPS URL, generate a private MyFlix certificate authority and server certificate:
+
+```powershell
+.\scripts\create-local-https-cert.ps1 -HttpsPort 5443 -SessionDays 180
+```
+
+The script:
+
+- creates `config/certs/` files, which are ignored by Git
+- trusts the MyFlix root CA for the current Windows user
+- writes HTTPS settings to `config/myflix.local.json`
+- keeps login tokens valid for `auth.sessionDays`, default `180`
+- redirects `http://YOUR-IP:5000/` to `https://YOUR-IP:5443/`
+
+Restart MyFlix after generating the certificate:
+
+```powershell
+.\service\myflix-service.ps1 -Action stop
+.\service\myflix-service.ps1 -Action start
+```
+
+Then open:
+
+```text
+https://192.168.1.15:5443/
+```
+
+Phones, tablets, and TVs do not automatically trust certificates generated on this Windows machine. To remove the warning on those devices, install this root CA as a trusted certificate on each device:
+
+```text
+config\certs\myflix-local-root-ca.crt
+```
+
+If a browser was already open before the certificate was created, fully close and reopen that browser so it reloads the Windows certificate trust store.
+
+Browsers store login sessions per origin, so the first visit to the new HTTPS URL requires one login. After that, MyFlix stores the JWT in browser local storage and refreshes it on app startup, so you should not need to log in every time unless you log out, clear site data, switch browser/profile, or the session expires.
+
 Manual scan:
 
 ```powershell
@@ -202,7 +241,14 @@ With the default config, open MyFlix locally at:
 http://127.0.0.1:5000/
 ```
 
-For another device on the same network, use the host machine's LAN IP with port `5000`.
+If local HTTPS is enabled, use:
+
+```text
+https://127.0.0.1:5443/
+https://192.168.1.15:5443/
+```
+
+For another device on the same network, use the host machine's LAN IP with port `5000` for HTTP or port `5443` for HTTPS.
 
 ## ✨ Features
 
