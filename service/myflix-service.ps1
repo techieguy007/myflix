@@ -180,6 +180,23 @@ function Stop-MyFlixListeners {
     }
 }
 
+function Stop-MyFlixChildProcesses {
+    param([string]$RepoDir)
+    $transcodeDir = [System.IO.Path]::GetFullPath((Join-Path $RepoDir "transcodes"))
+    $mediaProcesses = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Name -match '^(ffmpeg|ffprobe)(\.exe)?$' -and
+            -not [string]::IsNullOrWhiteSpace([string]$_.CommandLine) -and
+            ([string]$_.CommandLine).IndexOf($transcodeDir, [StringComparison]::OrdinalIgnoreCase) -ge 0
+        } |
+        Sort-Object ProcessId -Unique
+
+    foreach ($process in $mediaProcesses) {
+        Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+        Write-Output "Stopped MyFlix media process $($process.ProcessId) ($($process.Name))."
+    }
+}
+
 $ConfigPath = Resolve-ExistingPath $ConfigPath
 $ServiceDir = Split-Path -Parent $PSCommandPath
 $RepoDir = Split-Path -Parent $ServiceDir
@@ -261,6 +278,7 @@ switch ($Action) {
             Stop-ScheduledTask -TaskName $TaskName
         }
         Stop-MyFlixListeners $Runtime $ServerPath
+        Stop-MyFlixChildProcesses $RepoDir
         Show-TaskStatus $TaskName $Runtime $ServerPath
         break
     }

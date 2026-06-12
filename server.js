@@ -16,11 +16,15 @@ const libraryRoutes = require('./routes/library');
 require('./database/init');
 const { loadConfig } = require('./lib/config');
 const { runLibraryScan } = require('./lib/libraryScanner');
+const { stopAllTranscodeJobs } = require('./lib/transcoder');
 
 const app = express();
 const appConfig = loadConfig();
 const PORT = appConfig.server.port || 5000;
 const HOST = appConfig.server.host || '0.0.0.0';
+let server = null;
+let startupScanTimer = null;
+let shuttingDown = false;
 
 app.use(helmet({
   crossOriginEmbedderPolicy: false,
@@ -149,7 +153,7 @@ function scheduleStartupScan() {
   }
 
   const delay = appConfig.media.scanDelayMs || 2500;
-  setTimeout(() => {
+  startupScanTimer = setTimeout(() => {
     console.log(`Scanning media library at ${appConfig.media.root}`);
     runLibraryScan({ trigger: 'startup', config: appConfig })
       .then((result) => {
@@ -161,7 +165,50 @@ function scheduleStartupScan() {
   }, delay);
 }
 
-app.listen(PORT, HOST, () => {
+function cleanupTranscodeJobs(reason) {
+  const stopped = stopAllTranscodeJobs();
+  if (stopped > 0) {
+    console.log(`Stopped ${stopped} transcode job(s) during ${reason}.`);
+  }
+}
+
+function shutdown(reason, exitCode = 0) {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+
+  if (startupScanTimer) {
+    clearTimeout(startupScanTimer);
+    startupScanTimer = null;
+  }
+
+  cleanupTranscodeJobs(reason);
+
+  if (!server) {
+    process.exit(exitCode);
+    return;
+  }
+
+  server.close(() => {
+    process.exit(exitCode);
+  });
+
+  setTimeout(() => {
+    process.exit(exitCode);
+  }, 5000).unref();
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGHUP', () => shutdown('SIGHUP'));
+process.on('exit', () => cleanupTranscodeJobs('process exit'));
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception:', error);
+  shutdown('uncaught exception', 1);
+});
+
+server = app.listen(PORT, HOST, () => {
   createDirectories();
   console.log(`MyFlix server running on ${HOST}:${PORT}`);
   console.log('Access MyFlix at:');
