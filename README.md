@@ -80,6 +80,8 @@ Browsers cannot directly play many local-library formats such as MKV, HEVC/x265,
 
 - Browser-compatible MP4/WebM files are streamed directly.
 - Incompatible files are transcoded on demand to HLS using `ffmpeg`.
+- Files with multiple audio tracks expose an audio selector in the player; changing audio reloads the HLS stream at the same timestamp.
+- Embedded text subtitles are exposed in the subtitle selector and converted to cached WebVTT when selected.
 - HLS output is cached locally under `transcodes/` and ignored by Git.
 
 Install `ffmpeg` and `ffprobe` on the server machine for this fallback to work. The Windows service uses the system PATH, or you can set `FFMPEG_PATH` and `FFPROBE_PATH` environment variables.

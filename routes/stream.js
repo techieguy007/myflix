@@ -6,9 +6,11 @@ const { optionalAuth } = require('../middleware/auth');
 const jwt = require('jsonwebtoken');
 const {
   ensureHlsTranscode,
+  ensureSubtitleTrack,
   getPlaybackProfile,
   hlsAssetPath,
   hlsContentType,
+  optionsFromVariant,
   waitForFile
 } = require('../lib/transcoder');
 
@@ -76,6 +78,15 @@ function tokenQuery(req) {
   return req.query.token ? `?token=${encodeURIComponent(req.query.token)}` : '';
 }
 
+function selectedAudioFromQuery(req) {
+  if (req.query.audio === undefined || req.query.audio === '' || req.query.audio === 'auto') {
+    return {};
+  }
+
+  const audioStreamIndex = Number(req.query.audio);
+  return Number.isInteger(audioStreamIndex) ? { audioStreamIndex } : {};
+}
+
 async function getStreamMovie(movieId) {
   const movie = await db.get('SELECT id, video_path, title, file_size FROM movies WHERE id = ?', [movieId]);
 
@@ -98,7 +109,7 @@ async function getStreamMovie(movieId) {
 router.get('/:id/playback', streamAuth, async (req, res) => {
   try {
     const movie = await getStreamMovie(req.params.id);
-    const profile = await getPlaybackProfile(movie);
+    const profile = await getPlaybackProfile(movie, selectedAudioFromQuery(req));
     const query = tokenQuery(req);
 
     res.json({
@@ -106,7 +117,7 @@ router.get('/:id/playback', streamAuth, async (req, res) => {
       title: movie.title,
       streamMode: profile.streamMode,
       directUrl: `/api/stream/${movie.id}${query}`,
-      hlsUrl: `/api/stream/${movie.id}/hls/index.m3u8${query}`,
+      hlsUrl: `/api/stream/${movie.id}/hls/${profile.hlsVariant}/index.m3u8${query}`,
       compatibility: profile
     });
   } catch (error) {
@@ -116,18 +127,19 @@ router.get('/:id/playback', streamAuth, async (req, res) => {
 });
 
 // Generate and serve HLS playlists/segments for browser-incompatible files.
-router.get('/:id/hls/:file', streamAuth, async (req, res) => {
+router.get('/:id/hls/:variant/:file', streamAuth, async (req, res) => {
   try {
     const movie = await getStreamMovie(req.params.id);
+    const variant = req.params.variant;
     const fileName = req.params.file;
-    const assetPath = hlsAssetPath(movie.id, movie.video_path, fileName);
+    const assetPath = hlsAssetPath(movie.id, movie.video_path, variant, fileName);
 
     if (!assetPath) {
       return res.status(400).json({ error: 'Invalid HLS asset path' });
     }
 
     if (fileName === 'index.m3u8') {
-      const job = ensureHlsTranscode(movie);
+      const job = ensureHlsTranscode(movie, optionsFromVariant(variant));
       const ready = job.ready || await waitForFile(job.manifestPath, 25000);
       if (!ready) {
         return res.status(503).json({ error: 'Transcode is still starting. Retry in a few seconds.' });
@@ -148,6 +160,24 @@ router.get('/:id/hls/:file', streamAuth, async (req, res) => {
   } catch (error) {
     console.error('HLS streaming error:', error);
     return res.status(error.statusCode || 500).json({ error: error.message || 'HLS streaming error' });
+  }
+});
+
+router.get('/:id/subtitle/:streamIndex.vtt', streamAuth, async (req, res) => {
+  try {
+    const movie = await getStreamMovie(req.params.id);
+    const subtitlePath = await ensureSubtitleTrack(movie, req.params.streamIndex);
+
+    res.set({
+      'Content-Type': 'text/vtt; charset=utf-8',
+      'Cache-Control': 'public, max-age=3600',
+      'Cross-Origin-Resource-Policy': 'cross-origin'
+    });
+
+    return res.sendFile(subtitlePath);
+  } catch (error) {
+    console.error('Subtitle extraction error:', error);
+    return res.status(error.statusCode || 500).json({ error: error.message || 'Subtitle extraction error' });
   }
 });
 

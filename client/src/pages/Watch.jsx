@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
-import { FiArrowLeft, FiPlay, FiPause, FiMaximize2, FiType } from 'react-icons/fi';
+import { FiArrowLeft, FiPlay, FiPause, FiMaximize2, FiType, FiVolume2 } from 'react-icons/fi';
 import Hls from 'hls.js';
 import api from '../utils/api';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -166,6 +166,11 @@ const SubtitleOption = styled.button`
     background: rgba(229, 9, 20, 0.3);
     color: ${({ theme }) => theme.colors.primary};
   }
+
+  &:disabled {
+    color: rgba(255, 255, 255, 0.35);
+    cursor: not-allowed;
+  }
 `;
 
 const SubtitleContainer = styled.div`
@@ -236,8 +241,13 @@ const Watch = () => {
   const [duration, setDuration] = useState(0);
   const [showControls, setShowControls] = useState(true);
   const [videoRef, setVideoRef] = useState(null);
+  const resumeTimeRef = useRef(0);
+  const shouldResumeRef = useRef(false);
+  const [audioTracks, setAudioTracks] = useState([]);
+  const [activeAudio, setActiveAudio] = useState(null);
+  const [showAudioMenu, setShowAudioMenu] = useState(false);
   const [subtitleTracks, setSubtitleTracks] = useState([]);
-  const [activeSubtitle, setActiveSubtitle] = useState(-1); // -1 means no subtitles
+  const [activeSubtitle, setActiveSubtitle] = useState(null);
   const [showSubtitleMenu, setShowSubtitleMenu] = useState(false);
   const [videoError, setVideoError] = useState(null);
   const [videoSrc, setVideoSrc] = useState('');
@@ -247,22 +257,6 @@ const Watch = () => {
   useEffect(() => {
     fetchMovie();
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Ensure subtitle button is visible by providing fallback tracks
-  useEffect(() => {
-    if (subtitleTracks.length === 0) {
-      // Add fallback tracks to always show subtitle button
-      setTimeout(() => {
-        if (subtitleTracks.length === 0) {
-          setSubtitleTracks([
-            { index: 0, label: 'English', language: 'en', kind: 'subtitles', browserTrack: true },
-            { index: 1, label: 'Español', language: 'es', kind: 'subtitles', browserTrack: true },
-            { index: 2, label: 'Français', language: 'fr', kind: 'subtitles', browserTrack: true }
-          ]);
-        }
-      }, 2000); // Wait 2 seconds for real tracks to be detected
-    }
-  }, [subtitleTracks.length]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -276,14 +270,15 @@ const Watch = () => {
 
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (showSubtitleMenu && !event.target.closest('.subtitle-container')) {
+      if ((showSubtitleMenu || showAudioMenu) && !event.target.closest('.track-menu')) {
         setShowSubtitleMenu(false);
+        setShowAudioMenu(false);
       }
     };
 
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
-  }, [showSubtitleMenu]);
+  }, [showAudioMenu, showSubtitleMenu]);
 
   useEffect(() => {
     if (!videoRef || !videoSrc || streamMode !== 'hls') {
@@ -340,52 +335,87 @@ const Watch = () => {
     };
   }, [videoRef, videoSrc, streamMode]);
 
+  const baseUrl = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5000';
+
+  const tokenParam = () => {
+    const token = localStorage.getItem('authToken');
+    return token ? `?token=${encodeURIComponent(token)}` : '';
+  };
+
+  const toAbsoluteUrl = (pathOrUrl) => (
+    pathOrUrl && pathOrUrl.startsWith('http') ? pathOrUrl : `${baseUrl}${pathOrUrl}`
+  );
+
+  const applyPlayback = (playback) => {
+    const tracks = playback.compatibility || {};
+    const audio = tracks.audioTracks || [];
+    const subtitles = tracks.subtitleTracks || [];
+    const selectedAudio = tracks.selectedAudioStreamIndex ?? (audio[0] ? audio[0].streamIndex : null);
+
+    setPlaybackInfo(playback);
+    setStreamMode(playback.streamMode || 'direct');
+    setAudioTracks(audio);
+    setActiveAudio(selectedAudio);
+    setSubtitleTracks(subtitles);
+    setActiveSubtitle((current) => (
+      subtitles.some((track) => track.streamIndex === current && track.extractable) ? current : null
+    ));
+
+    const sourcePath = playback.streamMode === 'hls' ? playback.hlsUrl : playback.directUrl;
+    setVideoSrc(toAbsoluteUrl(sourcePath));
+  };
+
+  const loadPlayback = async (movieId, audioStreamIndex = null) => {
+    const params = new URLSearchParams();
+    const token = localStorage.getItem('authToken');
+    if (token) params.set('token', token);
+    if (Number.isInteger(audioStreamIndex)) params.set('audio', String(audioStreamIndex));
+
+    const query = params.toString() ? `?${params.toString()}` : '';
+    const playbackResponse = await api.get(`/api/stream/${movieId}/playback${query}`);
+    applyPlayback(playbackResponse.data);
+  };
+
+  const subtitleUrl = (track) => (
+    toAbsoluteUrl(`/api/stream/${id}/subtitle/${track.streamIndex}.vtt${tokenParam()}`)
+  );
+
+  const extractableSubtitleTracks = subtitleTracks.filter((track) => track.extractable);
+
+  const applySubtitleSelection = () => {
+    if (!videoRef) return;
+
+    for (let i = 0; i < videoRef.textTracks.length; i++) {
+      const track = extractableSubtitleTracks[i];
+      videoRef.textTracks[i].mode = track && track.streamIndex === activeSubtitle ? 'showing' : 'disabled';
+    }
+  };
+
+  useEffect(() => {
+    applySubtitleSelection();
+  }, [videoRef, activeSubtitle, subtitleTracks, videoSrc]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const fetchMovie = async () => {
     try {
       setLoading(true);
       setVideoError(null);
       setPlaybackInfo(null);
       setStreamMode('direct');
-      const [movieResponse, subtitleResponse] = await Promise.allSettled([
-        api.get(`/api/movies/${id}`),
-        api.get(`/api/movies/${id}/subtitles`)
-      ]);
+      setAudioTracks([]);
+      setSubtitleTracks([]);
+      setActiveAudio(null);
+      setActiveSubtitle(null);
 
-      if (movieResponse.status === 'fulfilled') {
-        setMovie(movieResponse.value.data);
+      const movieResponse = await api.get(`/api/movies/${id}`);
+      setMovie(movieResponse.data);
 
-        const baseUrl = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5000';
-        const token = localStorage.getItem('authToken');
-        const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-
-        try {
-          const playbackResponse = await api.get(`/api/stream/${movieResponse.value.data.id}/playback${tokenParam}`);
-          const playback = playbackResponse.data;
-          setPlaybackInfo(playback);
-          setStreamMode(playback.streamMode || 'direct');
-          const sourcePath = playback.streamMode === 'hls' ? playback.hlsUrl : playback.directUrl;
-          setVideoSrc(sourcePath.startsWith('http') ? sourcePath : `${baseUrl}${sourcePath}`);
-        } catch (playbackError) {
-          console.warn('Playback profile failed; falling back to direct stream:', playbackError);
-          setPlaybackInfo(null);
-          setStreamMode('direct');
-          setVideoSrc(`${baseUrl}/api/stream/${movieResponse.value.data.id}${tokenParam}`);
-        }
-      } else {
-        throw new Error('Failed to fetch movie');
-      }
-
-      // Set subtitle tracks from backend if available
-      if (subtitleResponse.status === 'fulfilled' && subtitleResponse.value.data.subtitles) {
-        const backendSubtitles = subtitleResponse.value.data.subtitles.map(sub => ({
-          index: sub.index,
-          label: sub.title || (sub.language !== 'unknown' ? `${sub.language} (${sub.codec})` : `Track ${sub.index}`),
-          language: sub.language,
-          kind: 'subtitles',
-          default: sub.default,
-          forced: sub.forced
-        }));
-        setSubtitleTracks(backendSubtitles);
+      try {
+        await loadPlayback(movieResponse.data.id);
+      } catch (playbackError) {
+        console.warn('Playback profile failed; falling back to direct stream:', playbackError);
+        setPlaybackInfo(null);
+        setStreamMode('direct');
+        setVideoSrc(`${baseUrl}/api/stream/${movieResponse.data.id}${tokenParam()}`);
       }
     } catch (err) {
       console.error('Failed to fetch movie:', err);
@@ -414,51 +444,19 @@ const Watch = () => {
   const handleLoadedMetadata = () => {
     if (videoRef) {
       setDuration(videoRef.duration);
-      
-      // Detect browser subtitle tracks
-      const browserTracks = [];
-      for (let i = 0; i < videoRef.textTracks.length; i++) {
-        const track = videoRef.textTracks[i];
-        
-        if (track.kind === 'subtitles' || track.kind === 'captions') {
-          browserTracks.push({
-            index: i,
-            label: track.label || track.language || `Track ${i + 1}`,
-            language: track.language || 'unknown',
-            kind: track.kind,
-            browserTrack: true
-          });
-        }
+
+      if (resumeTimeRef.current > 0) {
+        videoRef.currentTime = resumeTimeRef.current;
+        resumeTimeRef.current = 0;
       }
-      
-      // Use browser tracks if found, otherwise they'll be detected from <track> elements
-      if (browserTracks.length > 0) {
-        setSubtitleTracks(browserTracks);
-      } else {
-        // If no tracks detected immediately, set a timeout to recheck
-        setTimeout(() => {
-          const delayedTracks = [];
-          for (let i = 0; i < videoRef.textTracks.length; i++) {
-            const track = videoRef.textTracks[i];
-            if (track.kind === 'subtitles' || track.kind === 'captions') {
-              delayedTracks.push({
-                index: i,
-                label: track.label || track.language || `Track ${i + 1}`,
-                language: track.language || 'unknown',
-                kind: track.kind,
-                browserTrack: true
-              });
-            }
-          }
-          if (delayedTracks.length > 0) {
-            setSubtitleTracks(delayedTracks);
-          }
-        }, 500);
-      }
-      
-      // Disable all tracks initially
-      for (let i = 0; i < videoRef.textTracks.length; i++) {
-        videoRef.textTracks[i].mode = 'disabled';
+
+      applySubtitleSelection();
+
+      if (shouldResumeRef.current) {
+        shouldResumeRef.current = false;
+        videoRef.play().catch((error) => {
+          console.warn('Unable to resume playback after track change:', error);
+        });
       }
     }
   };
@@ -488,25 +486,30 @@ const Watch = () => {
     }
   };
 
-  const handleSubtitleSelect = (trackIndex) => {
-    if (!videoRef) {
+  const handleAudioSelect = async (streamIndex) => {
+    if (!movie || streamIndex === activeAudio) {
+      setShowAudioMenu(false);
       return;
     }
-    
-    // Disable all tracks first
-    for (let i = 0; i < videoRef.textTracks.length; i++) {
-      videoRef.textTracks[i].mode = 'disabled';
+
+    try {
+      resumeTimeRef.current = videoRef ? videoRef.currentTime : 0;
+      shouldResumeRef.current = isPlaying;
+      setVideoError(null);
+      setShowAudioMenu(false);
+      if (videoRef) videoRef.pause();
+      await loadPlayback(movie.id, streamIndex);
+    } catch (trackError) {
+      console.error('Failed to switch audio track:', trackError);
+      setVideoError({
+        message: 'Audio track switch failed',
+        details: 'MyFlix could not prepare that audio track. Try another track.'
+      });
     }
-    
-    if (trackIndex >= 0 && videoRef.textTracks[trackIndex]) {
-      // Enable selected track
-      videoRef.textTracks[trackIndex].mode = 'showing';
-      setActiveSubtitle(trackIndex);
-    } else {
-      // No subtitles selected
-      setActiveSubtitle(-1);
-    }
-    
+  };
+
+  const handleSubtitleSelect = (streamIndex) => {
+    setActiveSubtitle(Number.isInteger(streamIndex) ? streamIndex : null);
     setShowSubtitleMenu(false);
   };
 
@@ -655,6 +658,17 @@ const Watch = () => {
           crossOrigin="anonymous"
           preload="metadata"
         >
+          {extractableSubtitleTracks.map((track) => (
+            <track
+              key={track.streamIndex}
+              kind={track.forced ? 'captions' : 'subtitles'}
+              src={subtitleUrl(track)}
+              srcLang={track.language && track.language !== 'und' ? track.language : 'en'}
+              label={track.label}
+            />
+          ))}
+          {false && (
+            <>
           {/* Sample subtitle tracks for testing */}
           <track 
             kind="subtitles" 
@@ -674,6 +688,8 @@ const Watch = () => {
             srclang="fr" 
             label="Français"
           />
+            </>
+          )}
         </Video>
 
         <Controls visible={showControls}>
@@ -685,27 +701,63 @@ const Watch = () => {
             <ControlButton onClick={handlePlayPause}>
               {isPlaying ? <FiPause /> : <FiPlay />}
             </ControlButton>
+
+            {audioTracks.length > 1 && (
+              <SubtitleContainer className="track-menu">
+                <ControlButton
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setShowAudioMenu(!showAudioMenu);
+                    setShowSubtitleMenu(false);
+                  }}
+                  title="Audio track"
+                >
+                  <FiVolume2 />
+                </ControlButton>
+                <SubtitleMenu visible={showAudioMenu}>
+                  {audioTracks.map((track) => (
+                    <SubtitleOption
+                      key={track.streamIndex}
+                      onClick={() => handleAudioSelect(track.streamIndex)}
+                      className={activeAudio === track.streamIndex ? 'active' : ''}
+                    >
+                      {track.label}
+                      {track.channels && ` (${track.channels} ch)`}
+                      {track.default && ' Default'}
+                    </SubtitleOption>
+                  ))}
+                </SubtitleMenu>
+              </SubtitleContainer>
+            )}
             
             {subtitleTracks.length > 0 && (
-              <SubtitleContainer className="subtitle-container">
-                <ControlButton onClick={() => setShowSubtitleMenu(!showSubtitleMenu)}>
+              <SubtitleContainer className="track-menu">
+                <ControlButton
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setShowSubtitleMenu(!showSubtitleMenu);
+                    setShowAudioMenu(false);
+                  }}
+                  title="Subtitles"
+                >
                   <FiType />
                 </ControlButton>
                 <SubtitleMenu visible={showSubtitleMenu}>
                   <SubtitleOption
-                    onClick={() => handleSubtitleSelect(-1)}
-                    className={activeSubtitle === -1 ? 'active' : ''}
+                    onClick={() => handleSubtitleSelect(null)}
+                    className={activeSubtitle === null ? 'active' : ''}
                   >
                     Off
                   </SubtitleOption>
                   {subtitleTracks.map((track) => (
                     <SubtitleOption
-                      key={track.index}
-                      onClick={() => handleSubtitleSelect(track.index)}
-                      className={activeSubtitle === track.index ? 'active' : ''}
+                      key={track.streamIndex}
+                      onClick={() => handleSubtitleSelect(track.extractable ? track.streamIndex : null)}
+                      className={activeSubtitle === track.streamIndex ? 'active' : ''}
+                      disabled={!track.extractable}
                     >
                       {track.label}
-                      {track.language && track.language !== 'unknown' && ` (${track.language})`}
+                      {!track.extractable && ' (not supported)'}
                     </SubtitleOption>
                   ))}
                 </SubtitleMenu>
