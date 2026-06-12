@@ -134,17 +134,19 @@ const TimeDisplay = styled.span`
 `;
 
 const SubtitleMenu = styled.div`
-  position: absolute;
-  bottom: 100%;
-  right: 0;
+  position: fixed;
+  left: ${({ $position }) => ($position ? `${$position.left}px` : '1rem')};
+  bottom: ${({ $position }) => ($position ? `${$position.bottom}px` : '5rem')};
+  width: ${({ $position }) => ($position ? `${$position.width}px` : '240px')};
   background: rgba(0, 0, 0, 0.9);
   border-radius: 4px;
   padding: 0.5rem 0;
-  min-width: 200px;
-  max-height: 300px;
+  max-height: ${({ $position }) => ($position ? `${$position.maxHeight}px` : '300px')};
   overflow-y: auto;
-  z-index: 10;
-  display: ${({ visible }) => visible ? 'block' : 'none'};
+  overflow-x: hidden;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  z-index: 30;
+  display: ${({ $visible }) => $visible ? 'block' : 'none'};
 `;
 
 const SubtitleOption = styled.button`
@@ -156,6 +158,8 @@ const SubtitleOption = styled.button`
   text-align: left;
   cursor: pointer;
   font-size: 0.9rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
   transition: background-color 0.2s ease;
 
   &:hover {
@@ -249,6 +253,7 @@ const Watch = () => {
   const [subtitleTracks, setSubtitleTracks] = useState([]);
   const [activeSubtitle, setActiveSubtitle] = useState(null);
   const [showSubtitleMenu, setShowSubtitleMenu] = useState(false);
+  const [trackMenuPosition, setTrackMenuPosition] = useState(null);
   const [videoError, setVideoError] = useState(null);
   const [videoSrc, setVideoSrc] = useState('');
   const [streamMode, setStreamMode] = useState('direct');
@@ -260,25 +265,37 @@ const Watch = () => {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (isPlaying) {
+      if (isPlaying && !showAudioMenu && !showSubtitleMenu) {
         setShowControls(false);
       }
     }, 3000);
 
     return () => clearTimeout(timer);
-  }, [showControls, isPlaying]);
+  }, [showControls, isPlaying, showAudioMenu, showSubtitleMenu]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
       if ((showSubtitleMenu || showAudioMenu) && !event.target.closest('.track-menu')) {
         setShowSubtitleMenu(false);
         setShowAudioMenu(false);
+        setTrackMenuPosition(null);
       }
     };
 
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
   }, [showAudioMenu, showSubtitleMenu]);
+
+  useEffect(() => {
+    const closeTrackMenus = () => {
+      setShowSubtitleMenu(false);
+      setShowAudioMenu(false);
+      setTrackMenuPosition(null);
+    };
+
+    window.addEventListener('resize', closeTrackMenus);
+    return () => window.removeEventListener('resize', closeTrackMenus);
+  }, []);
 
   useEffect(() => {
     if (!videoRef || !videoSrc || streamMode !== 'hls') {
@@ -486,6 +503,35 @@ const Watch = () => {
     }
   };
 
+  const getTrackMenuPosition = (button) => {
+    const rect = button.getBoundingClientRect();
+    const margin = 12;
+    const width = Math.min(280, Math.max(200, window.innerWidth - margin * 2));
+    const idealLeft = rect.left + (rect.width / 2) - (width / 2);
+    const left = Math.min(
+      Math.max(idealLeft, margin),
+      Math.max(margin, window.innerWidth - width - margin)
+    );
+    const bottom = Math.max(margin, window.innerHeight - rect.top + 8);
+    const maxHeight = Math.max(140, Math.min(320, window.innerHeight - bottom - margin));
+
+    return {
+      left: Math.round(left),
+      bottom: Math.round(bottom),
+      width: Math.round(width),
+      maxHeight: Math.round(maxHeight)
+    };
+  };
+
+  const toggleTrackMenu = (event, menuName) => {
+    event.stopPropagation();
+    const shouldOpen = menuName === 'audio' ? !showAudioMenu : !showSubtitleMenu;
+
+    setTrackMenuPosition(shouldOpen ? getTrackMenuPosition(event.currentTarget) : null);
+    setShowAudioMenu(menuName === 'audio' ? shouldOpen : false);
+    setShowSubtitleMenu(menuName === 'subtitles' ? shouldOpen : false);
+  };
+
   const handleAudioSelect = async (streamIndex) => {
     if (!movie || streamIndex === activeAudio) {
       setShowAudioMenu(false);
@@ -497,6 +543,7 @@ const Watch = () => {
       shouldResumeRef.current = isPlaying;
       setVideoError(null);
       setShowAudioMenu(false);
+      setTrackMenuPosition(null);
       if (videoRef) videoRef.pause();
       await loadPlayback(movie.id, streamIndex);
     } catch (trackError) {
@@ -511,6 +558,7 @@ const Watch = () => {
   const handleSubtitleSelect = (streamIndex) => {
     setActiveSubtitle(Number.isInteger(streamIndex) ? streamIndex : null);
     setShowSubtitleMenu(false);
+    setTrackMenuPosition(null);
   };
 
   if (loading) {
@@ -705,16 +753,12 @@ const Watch = () => {
             {audioTracks.length > 1 && (
               <SubtitleContainer className="track-menu">
                 <ControlButton
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setShowAudioMenu(!showAudioMenu);
-                    setShowSubtitleMenu(false);
-                  }}
+                  onClick={(event) => toggleTrackMenu(event, 'audio')}
                   title="Audio track"
                 >
                   <FiVolume2 />
                 </ControlButton>
-                <SubtitleMenu visible={showAudioMenu}>
+                <SubtitleMenu $visible={showAudioMenu} $position={trackMenuPosition}>
                   {audioTracks.map((track) => (
                     <SubtitleOption
                       key={track.streamIndex}
@@ -733,16 +777,12 @@ const Watch = () => {
             {subtitleTracks.length > 0 && (
               <SubtitleContainer className="track-menu">
                 <ControlButton
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setShowSubtitleMenu(!showSubtitleMenu);
-                    setShowAudioMenu(false);
-                  }}
+                  onClick={(event) => toggleTrackMenu(event, 'subtitles')}
                   title="Subtitles"
                 >
                   <FiType />
                 </ControlButton>
-                <SubtitleMenu visible={showSubtitleMenu}>
+                <SubtitleMenu $visible={showSubtitleMenu} $position={trackMenuPosition}>
                   <SubtitleOption
                     onClick={() => handleSubtitleSelect(null)}
                     className={activeSubtitle === null ? 'active' : ''}
