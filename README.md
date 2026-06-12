@@ -138,8 +138,8 @@ During each scan MyFlix uses `ffprobe` to skip short clips when they are below `
 
 Browsers, TVs, and mobile devices do not agree on local-library formats such as MKV, HEVC/x265, EAC3, AVI, WMV, or even some MP4 variants. MyFlix standardizes the library into seekable MP4 files that work broadly across devices:
 
-- Background conversion targets MP4 with H.264 video, AAC stereo audio, `yuv420p`, and fast-start metadata.
-- The converter runs one file at a time, prefers `h264_nvenc` GPU encoding when available, and falls back to `libx264`.
+- Background conversion targets MP4 with H.264 Constrained Baseline video, AAC stereo audio, `yuv420p`, no B-frames, no embedded data/subtitle/chapter tracks, and fast-start metadata.
+- Mobile-safe conversion uses CPU `libx264` encoding for stricter browser compatibility; GPU/NVENC is no longer used for the final mobile-safe library target.
 - The selected audio track prefers Hindi, then English, then the source default.
 - Playback uses a direct MP4 stream with HTTP range support when the converted file exists.
 - Mobile playback waits for a seekable MP4 instead of relying on live fallback transcoding.
@@ -168,7 +168,7 @@ The Windows service passes these transcoding settings from `config/myflix.config
 }
 ```
 
-Use `ffmpegThreads: 1` for the lowest CPU usage. Prepared MP4 jobs run one at a time. Click `Convert All to Universal MP4` in Admin > Conversions to queue the whole library. Set `prepareOnStartup: true` when you want the service to continue queuing universal MP4 conversion after startup scans; `preparedMaxStartupJobs: 0` means no cap, so use a small number if you do not want login-time CPU spikes.
+Use `ffmpegThreads: 1` for the lowest CPU usage. Prepared MP4 jobs run one at a time. Click `Convert All to Mobile-Safe MP4` in Admin > Conversions to queue the whole library. Set `prepareOnStartup: true` when you want the service to continue queuing mobile-safe MP4 conversion after startup scans; `preparedMaxStartupJobs: 0` means no cap, so use a small number if you do not want login-time CPU spikes.
 
 When `deleteOriginalAfterPrepare` is enabled, a successfully prepared MP4 is copied next to the original file, the database is updated to point at that MP4, and then the old source file is deleted with retries. With the default config in this repo, originals with multiple audio tracks or embedded subtitles are also deleted after successful conversion; subtitle sidecars are extracted when possible before deletion.
 

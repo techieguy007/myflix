@@ -653,7 +653,7 @@ const Admin = () => {
       const queued = data?.result?.queued || 0;
       const alreadyQueued = data?.result?.alreadyQueued || 0;
       const alreadyConverted = data?.result?.alreadyConverted || 0;
-      toast.success(`Queued ${queued} universal MP4 conversion(s). ${alreadyConverted} already device-safe, ${alreadyQueued} already queued.`);
+      toast.success(`Queued ${queued} mobile-safe MP4 conversion(s). ${alreadyConverted} already mobile-safe, ${alreadyQueued} already queued.`);
       setSelectedMovies([]);
       setIsSelecting(false);
       queryClient.invalidateQueries(['admin-conversion-queue']);
@@ -675,7 +675,7 @@ const Admin = () => {
       const queued = data?.result?.queued || 0;
       const alreadyConverted = data?.result?.alreadyConverted || 0;
       const alreadyQueued = data?.result?.alreadyQueued || 0;
-      toast.success(`Queued ${queued} universal MP4 conversion(s). ${alreadyConverted} already device-safe, ${alreadyQueued} already queued.`);
+      toast.success(`Queued ${queued} mobile-safe MP4 conversion(s). ${alreadyConverted} already mobile-safe, ${alreadyQueued} already queued.`);
       queryClient.invalidateQueries(['admin-conversion-queue']);
       queryClient.invalidateQueries(['admin-conversions']);
     },
@@ -1361,7 +1361,7 @@ const Admin = () => {
                     variant="primary"
                     onClick={handleQueueSelectedConversions}
                     disabled={selectedMovies.length === 0 || queueSelectedConversionMutation.isLoading}
-                    title="Queue selected items for universal MP4 conversion"
+                    title="Queue selected items for mobile-safe MP4 conversion"
                   >
                     <FiCpu /> Convert Selected ({selectedMovies.length})
                   </SelectionButton>
@@ -1426,7 +1426,7 @@ const Admin = () => {
                         <MovieActions>
                           <ActionButton
                             onClick={() => handleQueueMovieConversion(movie.id)}
-                            title="Queue universal MP4 conversion"
+                            title="Queue mobile-safe MP4 conversion"
                           >
                             <FiCpu />
                           </ActionButton>
@@ -1461,7 +1461,7 @@ const Admin = () => {
                   Conversion History
                 </h2>
                 <p style={{ color: '#b3b3b3', marginTop: '0.5rem' }}>
-                  Files converted into device-safe H.264/AAC MP4 and what happened to their originals.
+                  Files converted into mobile-safe H.264 Baseline/AAC MP4 and what happened to their originals.
                 </p>
               </div>
               <SelectionButton
@@ -1487,11 +1487,11 @@ const Admin = () => {
                 <div>
                   <h3 style={{ color: 'white', margin: 0 }}>Background Conversion Queue</h3>
                   <p style={{ color: '#999', marginTop: '0.35rem', marginBottom: 0 }}>
-                    Converts library files to seekable H.264/AAC MP4 in the background until the queue is empty. Pause stops after the current file.
+                    Converts library files to seekable H.264 Baseline/AAC MP4 in the background until the queue is empty. Pause stops after the current file.
                   </p>
                 </div>
                 <div style={{ color: conversionQueue?.capabilities?.h264Nvenc ? '#46d369' : '#f5c542', fontWeight: 700 }}>
-                  GPU: {conversionQueue?.capabilities?.h264Nvenc ? 'h264_nvenc available' : 'not available'}
+                  {conversionQueue?.capabilities?.h264Nvenc ? 'GPU detected; mobile-safe output uses CPU libx264' : 'CPU libx264 mobile-safe mode'}
                 </div>
               </div>
 
@@ -1567,7 +1567,7 @@ const Admin = () => {
                   onClick={() => queueAllConversionMutation.mutate()}
                   disabled={queueAllConversionMutation.isLoading}
                 >
-                  <FiCpu /> Convert All to Universal MP4
+                  <FiCpu /> Convert All to Mobile-Safe MP4
                 </SelectionButton>
                 {conversionQueue?.paused ? (
                   <SelectionButton
@@ -1678,7 +1678,7 @@ const Admin = () => {
 
                 {!conversionData?.conversions?.length ? (
                   <div style={{ textAlign: 'center', padding: '3rem', color: '#999', background: '#222', borderRadius: '8px' }}>
-                    No conversions recorded yet. Queue universal MP4 conversion and completed files will appear here.
+                    No conversions recorded yet. Queue mobile-safe MP4 conversion and completed files will appear here.
                   </div>
                 ) : (
                   <div style={{ overflowX: 'auto', border: '1px solid #333', borderRadius: '8px' }}>
