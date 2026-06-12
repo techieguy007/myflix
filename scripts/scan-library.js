@@ -2,7 +2,12 @@ process.env.MYFLIX_DISABLE_DEMO_SEED = process.env.MYFLIX_DISABLE_DEMO_SEED || '
 
 const { runLibraryScan } = require('../lib/libraryScanner');
 
-runLibraryScan({ trigger: 'cli' })
+const forceRescan = process.argv.includes('--force');
+
+runLibraryScan({
+  trigger: forceRescan ? 'cli-force' : 'cli',
+  forceRescan
+})
   .then((result) => {
     console.log(JSON.stringify(result, null, 2));
     process.exit(0);

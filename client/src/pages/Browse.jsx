@@ -100,6 +100,11 @@ const Button = styled(motion.button)`
     color: white;
   }
 
+  &.warning {
+    background: #b45309;
+    color: white;
+  }
+
   &:disabled {
     cursor: not-allowed;
     opacity: 0.65;
@@ -319,21 +324,22 @@ const Browse = () => {
     if (result.alreadyRunning) return 'Library scan is already running.';
 
     const scanned = result.scanned ?? 0;
+    const skippedKnown = result.skippedKnown ?? 0;
     const added = result.added ?? 0;
     const updated = result.updated ?? 0;
     const removed = result.removed ?? 0;
-    return `Last scan: ${scanned} scanned, ${added} added, ${updated} updated, ${removed} removed.`;
+    return `Last scan: ${scanned} scanned, ${skippedKnown} skipped, ${added} added, ${updated} updated, ${removed} removed.`;
   };
 
-  const handleManualRescan = async () => {
+  const handleManualRescan = async ({ force = false } = {}) => {
     if (manualScanRunning || scanState?.running) return;
 
     setManualScanRunning(true);
     setScanResult(null);
-    toast.loading('Rebuilding library index...', { id: 'library-rescan' });
+    toast.loading(force ? 'Force rebuilding library index...' : 'Scanning for new media...', { id: 'library-rescan' });
 
     try {
-      const response = await api.post('/api/library/scan/rebuild', {}, { timeout: 10 * 60 * 1000 });
+      const response = await api.post('/api/library/scan/rebuild', { force }, { timeout: 10 * 60 * 1000 });
       const result = response.data || {};
       setScanResult(result);
       setScanState({ running: false, lastResult: result });
@@ -341,7 +347,7 @@ const Browse = () => {
       if (result.alreadyRunning) {
         toast('Library scan is already running.', { id: 'library-rescan' });
       } else {
-        toast.success(`Scan complete: ${result.scanned || 0} items checked.`, { id: 'library-rescan' });
+        toast.success(`Scan complete: ${result.scanned || 0} scanned, ${result.skippedKnown || 0} skipped.`, { id: 'library-rescan' });
       }
 
       await fetchLibrary({ quiet: true });
@@ -422,12 +428,24 @@ const Browse = () => {
               <Button
                 className="accent"
                 disabled={isScanning}
-                onClick={handleManualRescan}
+                onClick={() => handleManualRescan()}
                 whileHover={isScanning ? {} : { scale: 1.05 }}
                 whileTap={isScanning ? {} : { scale: 0.95 }}
               >
                 <FiRefreshCw />
-                {isScanning ? 'Scanning...' : 'Rescan Library'}
+                {isScanning ? 'Scanning...' : 'Scan New'}
+              </Button>
+            )}
+            {isAdmin && (
+              <Button
+                className="warning"
+                disabled={isScanning}
+                onClick={() => handleManualRescan({ force: true })}
+                whileHover={isScanning ? {} : { scale: 1.05 }}
+                whileTap={isScanning ? {} : { scale: 0.95 }}
+              >
+                <FiRefreshCw />
+                Force Rescan
               </Button>
             )}
           </ButtonGroup>

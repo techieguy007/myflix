@@ -88,6 +88,7 @@ function initializeTables() {
         original_path TEXT,
         suggested_path TEXT,
         last_scanned_at DATETIME,
+        file_mtime_ms REAL,
         metadata_source TEXT,
         FOREIGN KEY (uploaded_by) REFERENCES users (id)
       )
@@ -119,6 +120,7 @@ function initializeTables() {
           'original_path TEXT',
           'suggested_path TEXT',
           'last_scanned_at DATETIME',
+          'file_mtime_ms REAL',
           'metadata_source TEXT'
         ];
         

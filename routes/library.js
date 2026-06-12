@@ -99,14 +99,20 @@ router.get('/scan/status', authenticateToken, requireAdmin, (req, res) => {
 
 router.post('/scan/rebuild', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    const forceRescan = req.body?.force === true || req.query.force === 'true';
     logger.info('library.manual_scan_requested', {
       requestId: req.requestId,
-      userId: req.user && (req.user.userId || req.user.id)
+      userId: req.user && (req.user.userId || req.user.id),
+      forceRescan
     });
-    const result = await runLibraryScan({ trigger: 'manual' });
+    const result = await runLibraryScan({
+      trigger: forceRescan ? 'manual-force' : 'manual',
+      forceRescan
+    });
     logger.info('library.manual_scan_complete', {
       requestId: req.requestId,
       userId: req.user && (req.user.userId || req.user.id),
+      forceRescan,
       result
     });
     res.json(result);

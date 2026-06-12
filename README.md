@@ -24,6 +24,7 @@ Important settings:
 
 - `media.root`: media folder to scan, default `D:\movies`
 - `media.autoScanOnStart`: rebuilds the index whenever MyFlix starts
+- Startup and normal manual scans are incremental: previously scanned unchanged files are skipped
 - `media.renameMode`: `suggest` by default; use `apply` only when you want MyFlix to move/rename files
 - `media.minDurationMinutes`: ignores movie and TV video files shorter than this, default `15`
 - `metadata.omdbApiKeys`: set one or more OMDb keys; MyFlix will try the next key if the first is invalid or rate-limited
@@ -54,6 +55,12 @@ Manual scan:
 
 ```powershell
 npm run scan-library
+```
+
+Force a full rescan of every file:
+
+```powershell
+npm run scan-library -- --force
 ```
 
 The scanner detects movies, `S01E02` style TV episodes, and season folders such as:
