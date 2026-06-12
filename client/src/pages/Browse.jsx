@@ -143,6 +143,70 @@ const SeriesTitle = styled.h3`
   margin: 1.5rem 0 0.75rem;
 `;
 
+const SeriesHeader = styled.div`
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 1.5rem 0 0.75rem;
+
+  ${SeriesTitle} {
+    margin: 0;
+  }
+
+  @media (max-width: 640px) {
+    align-items: stretch;
+    flex-direction: column;
+  }
+`;
+
+const SeriesSummary = styled.p`
+  color: ${({ theme }) => theme.colors.textSecondary};
+  font-size: 0.9rem;
+  margin-top: 0.35rem;
+`;
+
+const SeriesSelectGroup = styled.label`
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 150px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+`;
+
+const SeriesSelect = styled.select`
+  appearance: none;
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  background: ${({ theme }) => theme.colors.backgroundCard};
+  color: ${({ theme }) => theme.colors.text};
+  padding: 0.65rem 2rem 0.65rem 0.8rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+  outline: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 17px) 50%,
+    calc(100% - 12px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+
+  &:focus {
+    border-color: ${({ theme }) => theme.colors.primary};
+  }
+
+  option {
+    color: #111827;
+  }
+`;
+
 const SeasonTitle = styled.h4`
   color: ${({ theme }) => theme.colors.textSecondary};
   font-size: 1rem;
@@ -298,6 +362,7 @@ const Browse = () => {
   const [manualScanRunning, setManualScanRunning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [selectedSeriesSeasons, setSelectedSeriesSeasons] = useState({});
 
   useEffect(() => {
     fetchLibrary();
@@ -398,6 +463,19 @@ const Browse = () => {
   const isScanning = manualScanRunning || scanState?.running;
   const visibleScanResult = scanResult || scanState?.lastResult;
 
+  const selectedSeasonForShow = (show) => {
+    const seasons = show.seasons || [];
+    const selectedSeasonNumber = selectedSeriesSeasons[show.title];
+    return seasons.find((season) => String(season.seasonNumber) === String(selectedSeasonNumber)) || seasons[0];
+  };
+
+  const handleSeriesSeasonChange = (showTitle, seasonNumber) => {
+    setSelectedSeriesSeasons((current) => ({
+      ...current,
+      [showTitle]: seasonNumber
+    }));
+  };
+
   if (loading) {
     return <LoadingSpinner fullScreen text="Loading library..." />;
   }
@@ -492,28 +570,54 @@ const Browse = () => {
             {series.length > 0 && (
               <Section>
                 <SectionTitle>TV Shows ({counts.series || series.length} shows, {counts.episodes || 0} episodes)</SectionTitle>
-                {series.map((show) => (
-                  <div key={show.title}>
-                    <SeriesTitle>{show.title}</SeriesTitle>
-                    {show.seasons.map((season) => (
-                      <div key={`${show.title}-${season.seasonNumber}`}>
-                        <SeasonTitle>Season {season.seasonNumber}</SeasonTitle>
-                        <MediaGrid>
-                          {season.episodes.map((episode, index) => (
-                            <MediaCard
-                              key={episode.id}
-                              item={episode}
-                              index={index}
-                              cardVariants={cardVariants}
-                              navigate={navigate}
-                              episode
-                            />
-                          ))}
-                        </MediaGrid>
-                      </div>
-                    ))}
-                  </div>
-                ))}
+                {series.map((show) => {
+                  const selectedSeason = selectedSeasonForShow(show);
+                  if (!selectedSeason) return null;
+
+                  return (
+                    <div key={show.title}>
+                      <SeriesHeader>
+                        <div>
+                          <SeriesTitle>{show.title}</SeriesTitle>
+                          <SeriesSummary>
+                            {show.episodeCount || 0} episodes across {(show.seasons || []).length} season{(show.seasons || []).length === 1 ? '' : 's'}
+                          </SeriesSummary>
+                        </div>
+
+                        <SeriesSelectGroup>
+                          <span>Season</span>
+                          <SeriesSelect
+                            value={String(selectedSeason.seasonNumber)}
+                            onChange={(event) => handleSeriesSeasonChange(show.title, event.target.value)}
+                            aria-label={`${show.title} season`}
+                          >
+                            {(show.seasons || []).map((season) => (
+                              <option key={season.seasonNumber} value={String(season.seasonNumber)}>
+                                Season {season.seasonNumber}
+                              </option>
+                            ))}
+                          </SeriesSelect>
+                        </SeriesSelectGroup>
+                      </SeriesHeader>
+
+                      <SeasonTitle>
+                        Season {selectedSeason.seasonNumber} ({selectedSeason.episodes.length} episodes)
+                      </SeasonTitle>
+                      <MediaGrid>
+                        {selectedSeason.episodes.map((episode, index) => (
+                          <MediaCard
+                            key={episode.id}
+                            item={episode}
+                            index={index}
+                            cardVariants={cardVariants}
+                            navigate={navigate}
+                            episode
+                          />
+                        ))}
+                      </MediaGrid>
+                    </div>
+                  );
+                })}
               </Section>
             )}
           </>

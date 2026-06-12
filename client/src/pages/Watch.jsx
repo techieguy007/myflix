@@ -201,6 +201,61 @@ const MovieMeta = styled.div`
   color: ${({ theme }) => theme.colors.textSecondary};
 `;
 
+const SeriesNavigation = styled.div`
+  display: flex;
+  gap: 0.85rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin: 0.5rem 0 1.25rem;
+`;
+
+const SeriesSelectGroup = styled.label`
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: ${({ $wide }) => ($wide ? '280px' : '150px')};
+  flex: ${({ $wide }) => ($wide ? '1 1 280px' : '0 1 150px')};
+  color: ${({ theme }) => theme.colors.textSecondary};
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+
+  @media (max-width: 640px) {
+    min-width: 100%;
+  }
+`;
+
+const SeriesSelect = styled.select`
+  appearance: none;
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  color: ${({ theme }) => theme.colors.text};
+  padding: 0.75rem 2.25rem 0.75rem 0.85rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+  outline: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) 50%,
+    calc(100% - 13px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+
+  &:focus {
+    border-color: ${({ theme }) => theme.colors.primary};
+    box-shadow: 0 0 0 2px rgba(229, 9, 20, 0.28);
+  }
+
+  option {
+    color: #111827;
+  }
+`;
+
 const MovieDescription = styled.p`
   color: ${({ theme }) => theme.colors.text};
   line-height: 1.6;
@@ -234,6 +289,15 @@ const episodeHeading = (movie) => {
   return `${movie.series_title || 'TV Show'} - S${season}E${episode} - ${movie.episode_title || movie.title}`;
 };
 
+const normalizeTitle = (value) => String(value || '').trim().toLowerCase();
+
+const episodeOptionLabel = (episode) => {
+  const episodeNumber = episode.episode_number
+    ? `E${String(episode.episode_number).padStart(2, '0')}`
+    : 'Episode';
+  return `${episodeNumber} - ${episode.episode_title || episode.title || 'Untitled'}`;
+};
+
 const Watch = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -259,6 +323,8 @@ const Watch = () => {
   const [videoSrc, setVideoSrc] = useState('');
   const [streamMode, setStreamMode] = useState('direct');
   const [playbackInfo, setPlaybackInfo] = useState(null);
+  const [seriesNavigation, setSeriesNavigation] = useState(null);
+  const [selectedSeasonNumber, setSelectedSeasonNumber] = useState('');
   const hlsRef = useRef(null);
   const hlsRecoveryRef = useRef({ network: 0, media: 0, native: 0 });
   const hlsRetryTimerRef = useRef(null);
@@ -659,9 +725,44 @@ const Watch = () => {
     applySubtitleSelection();
   }, [videoRef, activeSubtitle, subtitleTracks, videoSrc]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const loadSeriesNavigation = async (currentMovie) => {
+    if (currentMovie.media_type !== 'episode') {
+      setSeriesNavigation(null);
+      setSelectedSeasonNumber('');
+      return;
+    }
+
+    try {
+      const libraryResponse = await api.get('/api/library');
+      const shows = libraryResponse.data.series || [];
+      const currentMovieId = Number(currentMovie.id);
+      const currentSeriesTitle = normalizeTitle(currentMovie.series_title);
+
+      const matchingShow = shows.find((show) => (
+        (show.seasons || []).some((season) => (
+          (season.episodes || []).some((episode) => Number(episode.id) === currentMovieId)
+        ))
+      )) || shows.find((show) => normalizeTitle(show.title) === currentSeriesTitle);
+
+      if (!matchingShow) {
+        setSeriesNavigation(null);
+        setSelectedSeasonNumber('');
+        return;
+      }
+
+      setSeriesNavigation(matchingShow);
+      setSelectedSeasonNumber(String(currentMovie.season_number || matchingShow.seasons?.[0]?.seasonNumber || 1));
+    } catch (seriesError) {
+      console.warn('Failed to load series navigation:', seriesError);
+      setSeriesNavigation(null);
+      setSelectedSeasonNumber('');
+    }
+  };
+
   const fetchMovie = async () => {
     try {
       setLoading(true);
+      setError(null);
       setVideoError(null);
       setPlaybackInfo(null);
       setStreamMode('direct');
@@ -670,9 +771,12 @@ const Watch = () => {
       setSubtitleTracks([]);
       setActiveAudio(null);
       setActiveSubtitle(null);
+      setSeriesNavigation(null);
+      setSelectedSeasonNumber('');
 
       const movieResponse = await api.get(`/api/movies/${id}`);
       setMovie(movieResponse.data);
+      await loadSeriesNavigation(movieResponse.data);
 
       try {
         await loadPlayback(movieResponse.data.id);
@@ -838,6 +942,7 @@ const Watch = () => {
       const isTyping = target && (
         target.tagName === 'INPUT' ||
         target.tagName === 'TEXTAREA' ||
+        target.tagName === 'SELECT' ||
         target.isContentEditable
       );
 
@@ -940,6 +1045,16 @@ const Watch = () => {
     setTrackMenuPosition(null);
   };
 
+  const handleSeasonChange = (event) => {
+    setSelectedSeasonNumber(event.target.value);
+  };
+
+  const handleEpisodeChange = (event) => {
+    const nextEpisodeId = Number(event.target.value);
+    if (!nextEpisodeId || nextEpisodeId === Number(id)) return;
+    navigate(`/watch/${nextEpisodeId}`);
+  };
+
   if (loading) {
     return <LoadingSpinner fullScreen text="Loading movie..." />;
   }
@@ -958,6 +1073,15 @@ const Watch = () => {
     );
   }
 
+  const seriesSeasons = seriesNavigation?.seasons || [];
+  const selectedSeason = seriesSeasons.find(
+    (season) => String(season.seasonNumber) === String(selectedSeasonNumber)
+  ) || seriesSeasons[0];
+  const selectedSeasonEpisodes = selectedSeason?.episodes || [];
+  const selectedSeasonHasCurrentEpisode = selectedSeasonEpisodes.some(
+    (episode) => Number(episode.id) === Number(movie.id)
+  );
+  const selectedEpisodeValue = selectedSeasonHasCurrentEpisode ? String(movie.id) : '';
   const displayDuration = getKnownDuration();
   const progress = displayDuration ? (currentTime / displayDuration) * 100 : 0;
   const videoElementSrc = streamMode === 'hls' && Hls.isSupported() ? undefined : videoSrc;
@@ -1233,6 +1357,44 @@ const Watch = () => {
           {movie.duration && <span>{Math.floor(movie.duration / 60)} min</span>}
           {movie.rating && <span>⭐ {movie.rating}/10</span>}
         </MovieMeta>
+        {seriesNavigation && selectedSeason && (
+          <SeriesNavigation>
+            <SeriesSelectGroup>
+              <span>Season</span>
+              <SeriesSelect
+                value={String(selectedSeason.seasonNumber)}
+                onChange={handleSeasonChange}
+                aria-label="Season"
+              >
+                {seriesSeasons.map((season) => (
+                  <option key={season.seasonNumber} value={String(season.seasonNumber)}>
+                    Season {season.seasonNumber}
+                  </option>
+                ))}
+              </SeriesSelect>
+            </SeriesSelectGroup>
+
+            <SeriesSelectGroup $wide>
+              <span>Episode</span>
+              <SeriesSelect
+                value={selectedEpisodeValue}
+                onChange={handleEpisodeChange}
+                aria-label="Episode"
+              >
+                {!selectedSeasonHasCurrentEpisode && (
+                  <option value="" disabled>
+                    Select episode
+                  </option>
+                )}
+                {selectedSeasonEpisodes.map((episode) => (
+                  <option key={episode.id} value={String(episode.id)}>
+                    {episodeOptionLabel(episode)}
+                  </option>
+                ))}
+              </SeriesSelect>
+            </SeriesSelectGroup>
+          </SeriesNavigation>
+        )}
         {movie.description && (
           <MovieDescription>{movie.description}</MovieDescription>
         )}
