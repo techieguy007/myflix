@@ -300,6 +300,116 @@ function itemProgress(item) {
   return duration > 0 && watchTime > 0 ? (watchTime / duration) * 100 : 0;
 }
 
+function genreTokens(item) {
+  return String(item.genre || '')
+    .split(',')
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function ratingValue(item) {
+  const imdb = Number(item.imdb_rating);
+  if (Number.isFinite(imdb) && imdb > 0) return imdb;
+  const rating = Number(item.rating);
+  return Number.isFinite(rating) && rating > 0 ? rating : 0;
+}
+
+function yearValue(item) {
+  const year = Number(item.release_year);
+  return Number.isFinite(year) ? year : 0;
+}
+
+const curatedShelfDefinitions = [
+  {
+    title: 'Top Rated',
+    meta: 'Highest IMDb scores',
+    test: (item) => ratingValue(item) >= 6,
+    sort: (a, b) => ratingValue(b) - ratingValue(a)
+  },
+  {
+    title: 'New Releases',
+    meta: 'Newest titles',
+    test: (item) => yearValue(item) >= 2020,
+    sort: (a, b) => yearValue(b) - yearValue(a) || ratingValue(b) - ratingValue(a)
+  },
+  {
+    title: 'Comedies',
+    meta: 'Laugh-out-loud picks',
+    genres: ['comedy']
+  },
+  {
+    title: 'Dramas',
+    meta: 'Character-driven stories',
+    genres: ['drama']
+  },
+  {
+    title: 'Horror & Thrillers',
+    meta: 'Dark, tense, and scary',
+    genres: ['horror', 'thriller', 'mystery']
+  },
+  {
+    title: 'Action & Adventure',
+    meta: 'Big-screen energy',
+    genres: ['action', 'adventure']
+  },
+  {
+    title: 'Crime & Mystery',
+    meta: 'Cases, clues, and twists',
+    genres: ['crime', 'mystery']
+  },
+  {
+    title: 'War & History',
+    meta: 'Battlefield and period stories',
+    genres: ['war', 'history']
+  },
+  {
+    title: 'Sci-Fi & Fantasy',
+    meta: 'Other worlds and impossible ideas',
+    genres: ['sci-fi', 'science fiction', 'fantasy']
+  },
+  {
+    title: 'Family & Animation',
+    meta: 'All-ages viewing',
+    genres: ['family', 'animation']
+  },
+  {
+    title: 'Romance',
+    meta: 'Love stories',
+    genres: ['romance']
+  },
+  {
+    title: 'Documentaries',
+    meta: 'Real stories',
+    genres: ['documentary']
+  }
+];
+
+function shelfMatches(definition, item) {
+  if (definition.test) return definition.test(item);
+  const tokens = genreTokens(item);
+  return (definition.genres || []).some((genre) => tokens.includes(genre));
+}
+
+function buildCuratedShelves(items) {
+  return curatedShelfDefinitions
+    .map((definition) => {
+      const seen = new Set();
+      const shelfItems = items
+        .filter((item) => shelfMatches(definition, item))
+        .filter((item) => {
+          const id = Number(item.id);
+          if (seen.has(id)) return false;
+          seen.add(id);
+          return true;
+        })
+        .sort(definition.sort || ((a, b) => ratingValue(b) - ratingValue(a) || yearValue(b) - yearValue(a)))
+        .slice(0, 24);
+
+      return { ...definition, items: shelfItems };
+    })
+    .filter((shelf) => shelf.items.length > 0);
+}
+
 function LibraryShelf({ title, meta, items, favoriteIds, onOpen, onFavorite, compact = false, episode = false }) {
   if (!items.length) return null;
 
@@ -347,6 +457,7 @@ const Browse = () => {
   const allItems = useMemo(() => [...continueWatching, ...movies, ...episodes]
     .filter((item, index, list) => list.findIndex((candidate) => Number(candidate.id) === Number(item.id)) === index), [continueWatching, episodes, movies]);
   const favoriteItems = useMemo(() => allItems.filter((item) => favoriteIds.has(Number(item.id))), [allItems, favoriteIds]);
+  const curatedShelves = useMemo(() => buildCuratedShelves(allItems), [allItems]);
   const heroItem = useMemo(() => (
     continueWatching.find((item) => mediaImage(item))
     || movies.find((item) => mediaImage(item) && (item.plot || item.description))
@@ -578,6 +689,19 @@ const Browse = () => {
               onOpen={openItem}
               onFavorite={toggleFavorite}
             />
+
+            {curatedShelves.map((shelf) => (
+              <LibraryShelf
+                key={shelf.title}
+                title={shelf.title}
+                meta={shelf.meta}
+                items={shelf.items}
+                favoriteIds={favoriteIds}
+                onOpen={openItem}
+                onFavorite={toggleFavorite}
+                compact={shelf.title !== 'Top Rated'}
+              />
+            ))}
 
             <LibraryShelf
               title="Movies"
