@@ -1551,11 +1551,15 @@ const Admin = () => {
                 <div>
                   <h3 style={{ color: 'white', margin: 0 }}>Background Conversion Queue</h3>
                   <p style={{ color: '#999', marginTop: '0.35rem', marginBottom: 0 }}>
-                    Converts library files to seekable H.264 Baseline/AAC MP4 in the background until the queue is empty. Pause stops after the current file.
+                    Converts library files to seekable H.264/AAC MP4 in the background until the queue is empty. Pause stops after the current file.
                   </p>
                 </div>
                 <div style={{ color: conversionQueue?.capabilities?.h264Nvenc ? '#46d369' : '#f5c542', fontWeight: 700 }}>
-                  {conversionQueue?.capabilities?.h264Nvenc ? 'GPU detected; mobile-safe output uses CPU libx264' : 'CPU libx264 mobile-safe mode'}
+                  {conversionQueue?.capabilities?.h264Nvenc
+                    ? (conversionQueue?.capabilities?.cudaHwaccel && conversionQueue?.capabilities?.scaleCuda
+                      ? 'GPU detected; CUDA decode/scale + NVENC available'
+                      : 'GPU detected; NVENC available')
+                    : 'GPU unavailable; CPU libx264 mode'}
                 </div>
               </div>
 
@@ -1620,7 +1624,9 @@ const Admin = () => {
                   <div style={{ color: '#999', fontSize: '0.85rem', marginTop: '0.35rem' }}>
                     {formatPercent(conversionQueue.active.progress_percent)}
                     {conversionQueue.active.speed ? ` - ${conversionQueue.active.speed}` : ''}
-                    {conversionQueue.active.encoder_used ? ` - ${conversionQueue.active.encoder_used}` : ''}
+                    {conversionQueue.active.encoder_used
+                      ? ` - Actual: ${conversionQueue.active.encoder_used}`
+                      : ` - Requested: ${conversionQueue.active.encoder_preference || 'auto'}`}
                   </div>
                 </div>
               )}
@@ -1685,9 +1691,13 @@ const Admin = () => {
                             )}
                           </td>
                           <td style={{ padding: '0.9rem', color: '#b3b3b3' }}>
-                            <div>{job.encoder_used || job.encoder_preference || 'auto'}</div>
+                            <div>
+                              {job.encoder_used
+                                ? `Actual: ${job.encoder_used}`
+                                : (job.status === 'running' ? 'Starting encoder...' : 'Not started')}
+                            </div>
                             <div style={{ color: '#777', fontSize: '0.8rem', marginTop: '0.25rem' }}>
-                              Preference: {job.encoder_preference || 'auto'}
+                              Requested: {job.encoder_preference || 'auto'}
                             </div>
                           </td>
                           <td style={{ padding: '0.9rem', color: '#b3b3b3' }}>
