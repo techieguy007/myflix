@@ -295,6 +295,29 @@ function initializeTables() {
         console.log('App settings table ready');
       }
     });
+
+    db.run(`
+      CREATE TABLE IF NOT EXISTS user_sessions (
+        id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        username TEXT,
+        user_agent TEXT,
+        ip_address TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        revoke_reason TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        expires_at TEXT,
+        revoked_at TEXT,
+        FOREIGN KEY (user_id) REFERENCES users (id)
+      )
+    `, (err) => {
+      if (err) {
+        console.error('Error creating user_sessions table:', err);
+      } else {
+        console.log('User sessions table ready');
+      }
+    });
   });
 }
 

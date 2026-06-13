@@ -2,8 +2,14 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('../database/init');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, requireAdmin } = require('../middleware/auth');
 const { loadConfig } = require('../lib/config');
+const {
+  cleanupIdleSessions,
+  createSession,
+  getSessionSummary,
+  revokeSession
+} = require('../lib/sessions');
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';
@@ -11,9 +17,9 @@ const appConfig = loadConfig();
 const sessionDays = Math.max(1, Number(appConfig.auth?.sessionDays || 180));
 const tokenExpiresIn = `${sessionDays}d`;
 
-function signSessionToken(user) {
+function signSessionToken(user, sessionId) {
   return jwt.sign(
-    { userId: user.id, username: user.username, email: user.email },
+    { userId: user.id, username: user.username, email: user.email, sessionId },
     JWT_SECRET,
     { expiresIn: tokenExpiresIn }
   );
@@ -52,8 +58,8 @@ router.post('/register', async (req, res) => {
       [username, email, passwordHash]
     );
 
-    // Generate JWT token
-    const token = signSessionToken({ id: result.id, username, email });
+    const session = await createSession({ id: result.id, username, email }, req);
+    const token = signSessionToken({ id: result.id, username, email }, session.sessionId);
 
     res.status(201).json({
       message: 'User registered successfully',
@@ -97,8 +103,8 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Generate JWT token
-    const token = signSessionToken(user);
+    const session = await createSession(user, req);
+    const token = signSessionToken(user, session.sessionId);
 
     res.json({
       message: 'Login successful',
@@ -250,8 +256,7 @@ router.post('/refresh', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Generate new token
-    const token = signSessionToken(user);
+    const token = signSessionToken(user, req.user.sessionId);
 
     res.json({ token });
 
@@ -261,8 +266,38 @@ router.post('/refresh', authenticateToken, async (req, res) => {
   }
 });
 
-// Logout (client-side token removal, but we can track this server-side if needed)
-router.post('/logout', authenticateToken, (req, res) => {
+router.get('/sessions', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    res.json(await getSessionSummary(req.query.limit));
+  } catch (error) {
+    console.error('Session summary error:', error);
+    res.status(500).json({ error: 'Failed to fetch sessions' });
+  }
+});
+
+router.post('/sessions/cleanup', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const cleanup = await cleanupIdleSessions('manual-admin-cleanup');
+    const summary = await getSessionSummary(req.body?.limit || 100);
+    res.json({ cleanup, summary });
+  } catch (error) {
+    console.error('Session cleanup error:', error);
+    res.status(500).json({ error: 'Failed to clean idle sessions' });
+  }
+});
+
+router.delete('/sessions/:sessionId', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const result = await revokeSession(req.params.sessionId, 'admin-terminated');
+    res.json({ terminated: result.changes || 0 });
+  } catch (error) {
+    console.error('Session termination error:', error);
+    res.status(500).json({ error: 'Failed to terminate session' });
+  }
+});
+
+router.post('/logout', authenticateToken, async (req, res) => {
+  await revokeSession(req.user.sessionId, 'logout');
   res.json({ message: 'Logout successful' });
 });
 

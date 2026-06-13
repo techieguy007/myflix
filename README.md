@@ -31,6 +31,9 @@ Important settings:
 - `metadata.omdbApiKey`: single-key fallback for older configs
 - `OMDB_API_KEYS`: optional comma-separated environment variable for OMDb keys
 - If OMDb returns quota/auth errors such as `401`, MyFlix temporarily pauses that key until the next day so scans do not spam failed lookups
+- `auth.sessionDays`: maximum login token lifetime, default `180`
+- `auth.idleMinutes`: idle browser-session timeout before server-side revocation, default `120`
+- `auth.sessionCleanupIntervalMinutes`: how often idle/expired sessions are cleaned, default `5`
 - `server.host`: `0.0.0.0` allows access from other devices on your local network
 - `server.port`: default `5000`
 
@@ -99,6 +102,8 @@ config\certs\myflix-local-root-ca.crt
 If a browser was already open before the certificate was created, fully close and reopen that browser so it reloads the Windows certificate trust store.
 
 Browsers store login sessions per origin, so the first visit to the new HTTPS URL requires one login. After that, MyFlix stores the JWT in browser local storage and refreshes it on app startup, so you should not need to log in every time unless you log out, clear site data, switch browser/profile, or the session expires.
+
+MyFlix also tracks server-side browser sessions. Each authenticated request updates `last_seen_at`; sessions idle longer than `auth.idleMinutes` are automatically revoked by the cleanup loop. Admin > Sessions shows the current alive count and lets you clean idle sessions or terminate a session manually.
 
 Manual scan:
 
@@ -406,7 +411,7 @@ MyFlix is built using modern web technologies with a React.js frontend and Node.
 
 - **Full-Stack JavaScript** - Single language (JavaScript) for both frontend and backend
 - **RESTful API** - Backend exposes REST API endpoints
-- **JWT-based Authentication** - Stateless authentication system
+- **JWT-based Authentication** - Token authentication with server-side session tracking and idle revocation
 - **SQLite Database** - File-based database, perfect for home server setup
 - **React SPA** - Single Page Application with client-side routing
 

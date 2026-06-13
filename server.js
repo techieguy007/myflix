@@ -19,6 +19,7 @@ const subtitleRoutes = require('./routes/subtitles');
 const db = require('./database/init');
 const { loadConfig } = require('./lib/config');
 const logger = require('./lib/logger');
+const { cleanupIdleSessions, cleanupIntervalMinutes } = require('./lib/sessions');
 const { runLibraryScan } = require('./lib/libraryScanner');
 const {
   cleanupPendingPromotedOriginals,
@@ -34,6 +35,7 @@ const HOST = appConfig.server.host || '0.0.0.0';
 let server = null;
 let redirectServer = null;
 let startupScanTimer = null;
+let sessionCleanupTimer = null;
 let shuttingDown = false;
 let startupWorkStarted = false;
 
@@ -85,7 +87,8 @@ const authLimiter = rateLimit({
   message: { error: 'Too many login attempts, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
-  trustProxy: true
+  trustProxy: true,
+  skip: (req) => !(req.method === 'POST' && ['/login', '/register'].includes(req.path))
 });
 
 app.use('/api/movies', limiter);
@@ -296,6 +299,20 @@ function cleanupTranscodeJobs(reason) {
   }
 }
 
+function startSessionCleanup() {
+  if (sessionCleanupTimer) return;
+
+  cleanupIdleSessions('startup')
+    .catch((error) => logger.error('session.cleanup_failed', { trigger: 'startup', error }));
+
+  sessionCleanupTimer = setInterval(() => {
+    cleanupIdleSessions('interval')
+      .catch((error) => logger.error('session.cleanup_failed', { trigger: 'interval', error }));
+  }, cleanupIntervalMinutes * 60 * 1000);
+  sessionCleanupTimer.unref();
+  logger.info('session.cleanup_scheduled', { cleanupIntervalMinutes });
+}
+
 function shutdown(reason, exitCode = 0) {
   if (shuttingDown) {
     return;
@@ -306,6 +323,10 @@ function shutdown(reason, exitCode = 0) {
   if (startupScanTimer) {
     clearTimeout(startupScanTimer);
     startupScanTimer = null;
+  }
+  if (sessionCleanupTimer) {
+    clearInterval(sessionCleanupTimer);
+    sessionCleanupTimer = null;
   }
 
   cleanupTranscodeJobs(reason);
@@ -361,6 +382,7 @@ function startStartupWork() {
     .catch((error) => {
       logger.error('background_conversion.startup_resume_failed', { error });
     });
+  startSessionCleanup();
   scheduleStartupScan();
 }
 

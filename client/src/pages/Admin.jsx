@@ -15,7 +15,8 @@ import {
   FiRefreshCw,
   FiCpu,
   FiPlay,
-  FiPause
+  FiPause,
+  FiUsers
 } from 'react-icons/fi';
 import api from '../utils/api';
 
@@ -439,6 +440,20 @@ const formatDateTime = (value) => {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 };
 
+const formatSessionAge = (value) => {
+  if (!value) return '-';
+  const date = new Date(value);
+  const diffMs = Date.now() - date.getTime();
+  if (!Number.isFinite(diffMs) || diffMs < 0) return formatDateTime(value);
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hr ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+};
+
 const conversionStatusStyle = (status) => {
   switch (status) {
     case 'deleted':
@@ -594,6 +609,20 @@ const Admin = () => {
     refetchInterval: activeTab === 'conversions' ? 5000 : false
   });
 
+  const {
+    data: sessionData,
+    isLoading: sessionsLoading,
+    refetch: refetchSessions
+  } = useQuery({
+    queryKey: ['admin-sessions'],
+    queryFn: async () => {
+      const response = await api.get('/api/auth/sessions?limit=100');
+      return response.data;
+    },
+    enabled: activeTab === 'sessions',
+    refetchInterval: activeTab === 'sessions' ? 15000 : false
+  });
+
   // Delete movie mutation
   const deleteMovieMutation = useMutation({
     mutationFn: async (movieId) => {
@@ -709,6 +738,35 @@ const Admin = () => {
     },
     onError: (error) => {
       toast.error(error.response?.data?.error || 'Failed to resume conversion queue');
+    }
+  });
+
+  const cleanupSessionsMutation = useMutation({
+    mutationFn: async () => {
+      const response = await api.post('/api/auth/sessions/cleanup');
+      return response.data;
+    },
+    onSuccess: (data) => {
+      const cleanup = data?.cleanup || {};
+      toast.success(`Cleaned ${cleanup.idle || 0} idle and ${cleanup.expired || 0} expired session(s)`);
+      queryClient.invalidateQueries(['admin-sessions']);
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.error || 'Failed to clean idle sessions');
+    }
+  });
+
+  const terminateSessionMutation = useMutation({
+    mutationFn: async (sessionId) => {
+      const response = await api.delete(`/api/auth/sessions/${encodeURIComponent(sessionId)}`);
+      return response.data;
+    },
+    onSuccess: (data) => {
+      toast.success(`Terminated ${data?.terminated || 0} session(s)`);
+      queryClient.invalidateQueries(['admin-sessions']);
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.error || 'Failed to terminate session');
     }
   });
 
@@ -999,6 +1057,12 @@ const Admin = () => {
           onClick={() => handleTabChange('conversions')}
         >
           Conversions
+        </Tab>
+        <Tab
+          active={activeTab === 'sessions'}
+          onClick={() => handleTabChange('sessions')}
+        >
+          Sessions
         </Tab>
       </TabContainer>
 
@@ -1732,6 +1796,134 @@ const Admin = () => {
                             </tr>
                           );
                         })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'sessions' && (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '2rem', flexWrap: 'wrap' }}>
+              <div>
+                <h2 style={{ color: 'white', fontSize: '1.5rem', margin: 0 }}>
+                  Active Sessions
+                </h2>
+                <p style={{ color: '#b3b3b3', marginTop: '0.5rem' }}>
+                  Live browser sessions are expired after {sessionData?.idleMinutes || 120} idle minutes.
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <SelectionButton
+                  variant="secondary"
+                  onClick={() => refetchSessions()}
+                  disabled={sessionsLoading}
+                >
+                  <FiRefreshCw /> Refresh
+                </SelectionButton>
+                <SelectionButton
+                  variant="primary"
+                  onClick={() => cleanupSessionsMutation.mutate()}
+                  disabled={cleanupSessionsMutation.isLoading}
+                >
+                  <FiUsers /> Clean Idle
+                </SelectionButton>
+              </div>
+            </div>
+
+            {sessionsLoading ? (
+              <div style={{ textAlign: 'center', padding: '2rem' }}>
+                <LoadingSpinner />
+              </div>
+            ) : (
+              <>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                  gap: '1rem',
+                  marginBottom: '2rem'
+                }}>
+                  {[
+                    ['Alive now', sessionData?.alive || 0],
+                    ['Idle expired', sessionData?.counts?.idle || 0],
+                    ['Logged out', sessionData?.counts?.logged_out || 0],
+                    ['Revoked', sessionData?.counts?.revoked || 0]
+                  ].map(([label, value]) => (
+                    <div
+                      key={label}
+                      style={{
+                        background: '#222',
+                        border: '1px solid #333',
+                        borderRadius: '8px',
+                        padding: '1rem'
+                      }}
+                    >
+                      <div style={{ color: '#999', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{label}</div>
+                      <div style={{ color: 'white', fontSize: '1.5rem', fontWeight: 700 }}>{value}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {!sessionData?.sessions?.length ? (
+                  <div style={{ textAlign: 'center', padding: '3rem', color: '#999', background: '#222', borderRadius: '8px' }}>
+                    No sessions recorded yet.
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto', border: '1px solid #333', borderRadius: '8px' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '920px' }}>
+                      <thead>
+                        <tr style={{ background: '#222', color: '#b3b3b3', textAlign: 'left' }}>
+                          <th style={{ padding: '0.9rem' }}>User</th>
+                          <th style={{ padding: '0.9rem' }}>Status</th>
+                          <th style={{ padding: '0.9rem' }}>Last Seen</th>
+                          <th style={{ padding: '0.9rem' }}>Device</th>
+                          <th style={{ padding: '0.9rem' }}>IP</th>
+                          <th style={{ padding: '0.9rem' }}>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sessionData.sessions.map((session) => (
+                          <tr key={session.id} style={{ borderTop: '1px solid #333', color: '#ddd', verticalAlign: 'top' }}>
+                            <td style={{ padding: '0.9rem', fontWeight: 700 }}>
+                              {session.username || `User ${session.user_id}`}
+                              <div style={{ color: '#777', fontSize: '0.75rem', marginTop: '0.25rem' }}>
+                                {session.id}
+                              </div>
+                            </td>
+                            <td style={{ padding: '0.9rem', color: session.status === 'active' ? '#46d369' : '#f5c542', fontWeight: 700 }}>
+                              {session.status}
+                              {session.revoke_reason && (
+                                <div style={{ color: '#888', fontSize: '0.8rem', marginTop: '0.25rem' }}>
+                                  {session.revoke_reason}
+                                </div>
+                              )}
+                            </td>
+                            <td style={{ padding: '0.9rem', color: '#b3b3b3' }}>
+                              {formatSessionAge(session.last_seen_at)}
+                              <div style={{ color: '#777', fontSize: '0.8rem', marginTop: '0.25rem' }}>
+                                {formatDateTime(session.last_seen_at)}
+                              </div>
+                            </td>
+                            <td style={{ padding: '0.9rem', color: '#b3b3b3', maxWidth: '360px' }}>
+                              <div style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                                {session.user_agent || '-'}
+                              </div>
+                            </td>
+                            <td style={{ padding: '0.9rem', color: '#b3b3b3' }}>{session.ip_address || '-'}</td>
+                            <td style={{ padding: '0.9rem' }}>
+                              <SelectionButton
+                                variant="danger"
+                                disabled={session.status !== 'active' || terminateSessionMutation.isLoading}
+                                onClick={() => terminateSessionMutation.mutate(session.id)}
+                              >
+                                <FiX /> Terminate
+                              </SelectionButton>
+                            </td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>

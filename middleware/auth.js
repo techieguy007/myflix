@@ -1,11 +1,26 @@
 const jwt = require('jsonwebtoken');
 const db = require('../database/init');
 const logger = require('../lib/logger');
+const { touchSessionForToken } = require('../lib/sessions');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';
 
+function verifyJwtToken(token) {
+  return jwt.verify(token, JWT_SECRET);
+}
+
+async function authenticateTokenValue(token, req) {
+  const user = verifyJwtToken(token);
+  const session = await touchSessionForToken(user, token, req);
+  return {
+    ...user,
+    sessionId: session.sessionId,
+    sessionLegacy: session.legacy
+  };
+}
+
 // Middleware to authenticate JWT token
-const authenticateToken = (req, res, next) => {
+const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
 
@@ -18,19 +33,20 @@ const authenticateToken = (req, res, next) => {
     return res.status(401).json({ error: 'Access token required' });
   }
 
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) {
-      logger.warn('auth.token_invalid', {
-        requestId: req.requestId,
-        method: req.method,
-        url: logger.redactUrl(req.originalUrl || req.url),
-        error: err
-      });
-      return res.status(403).json({ error: 'Invalid or expired token' });
-    }
+  try {
+    const user = await authenticateTokenValue(token, req);
     req.user = user;
     next();
-  });
+  } catch (err) {
+    logger.warn('auth.token_invalid', {
+      requestId: req.requestId,
+      method: req.method,
+      url: logger.redactUrl(req.originalUrl || req.url),
+      error: err
+    });
+    const statusCode = err.sessionExpired ? 401 : 403;
+    return res.status(statusCode).json({ error: err.message || 'Invalid or expired token' });
+  }
 };
 
 // Middleware to check if user is admin
@@ -63,7 +79,7 @@ const requireAdmin = async (req, res, next) => {
 };
 
 // Optional authentication - doesn't fail if no token provided
-const optionalAuth = (req, res, next) => {
+const optionalAuth = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
@@ -72,23 +88,22 @@ const optionalAuth = (req, res, next) => {
     return next();
   }
 
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) {
-      logger.warn('auth.optional_token_invalid', {
-        requestId: req.requestId,
-        method: req.method,
-        url: logger.redactUrl(req.originalUrl || req.url),
-        error: err
-      });
-      req.user = null;
-    } else {
-      req.user = user;
-    }
-    next();
-  });
+  try {
+    req.user = await authenticateTokenValue(token, req);
+  } catch (err) {
+    logger.warn('auth.optional_token_invalid', {
+      requestId: req.requestId,
+      method: req.method,
+      url: logger.redactUrl(req.originalUrl || req.url),
+      error: err
+    });
+    req.user = null;
+  }
+  next();
 };
 
 module.exports = {
+  authenticateTokenValue,
   authenticateToken,
   requireAdmin,
   optionalAuth

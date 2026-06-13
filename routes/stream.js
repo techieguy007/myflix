@@ -4,7 +4,7 @@ const path = require('path');
 const db = require('../database/init');
 const logger = require('../lib/logger');
 const { optionalAuth } = require('../middleware/auth');
-const jwt = require('jsonwebtoken');
+const { authenticateTokenValue } = require('../middleware/auth');
 const {
   ensureHlsTranscode,
   ensureSubtitleTrack,
@@ -44,7 +44,6 @@ const isBrowserCompatible = (filePath) => {
 };
 
 const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';
 
 // Custom auth middleware for video streaming (supports query token)
 const streamAuth = async (req, res, next) => {
@@ -57,8 +56,7 @@ const streamAuth = async (req, res, next) => {
   
   if (token) {
     try {
-      const decoded = jwt.verify(token, JWT_SECRET);
-      req.user = decoded;
+      req.user = await authenticateTokenValue(token, req);
     } catch (error) {
       // Invalid token, but continue without auth (optional auth)
       logger.warn('stream.invalid_auth_token', {
