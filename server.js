@@ -135,10 +135,22 @@ app.get('/api/health', (req, res) => {
 });
 
 if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, 'client/build')));
+  const clientBuildPath = path.join(__dirname, 'client/build');
+  app.use(express.static(clientBuildPath, {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('index.html')) {
+        res.setHeader('Cache-Control', 'no-store');
+      } else if (filePath.includes(`${path.sep}static${path.sep}`)) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      } else {
+        res.setHeader('Cache-Control', 'no-cache');
+      }
+    }
+  }));
 
   app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'client/build', 'index.html'));
+    res.setHeader('Cache-Control', 'no-store');
+    res.sendFile(path.join(clientBuildPath, 'index.html'));
   });
 }
 
