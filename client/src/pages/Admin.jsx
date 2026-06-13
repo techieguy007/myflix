@@ -16,7 +16,8 @@ import {
   FiCpu,
   FiPlay,
   FiPause,
-  FiUsers
+  FiUsers,
+  FiArchive
 } from 'react-icons/fi';
 import api from '../utils/api';
 
@@ -753,6 +754,20 @@ const Admin = () => {
     },
     onError: (error) => {
       toast.error(error.response?.data?.error || 'Failed to resume conversion queue');
+    }
+  });
+
+  const clearConversionLogMutation = useMutation({
+    mutationFn: async () => {
+      const response = await api.delete('/api/library/conversions');
+      return response.data;
+    },
+    onSuccess: (data) => {
+      toast.success(`Cleared ${data?.hidden || 0} conversion log record(s)`);
+      queryClient.invalidateQueries(['admin-conversions']);
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.error || 'Failed to clear conversion log');
     }
   });
 
@@ -1543,16 +1558,34 @@ const Admin = () => {
                   Files converted into mobile-safe H.264 Baseline/AAC MP4 and what happened to their originals.
                 </p>
               </div>
-              <SelectionButton
-                variant="secondary"
-                onClick={() => {
-                  refetchConversions();
-                  refetchConversionQueue();
-                }}
-                disabled={conversionsLoading || conversionQueueLoading}
-              >
-                <FiRefreshCw /> Refresh
-              </SelectionButton>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <SelectionButton
+                  variant="secondary"
+                  onClick={() => {
+                    refetchConversions();
+                    refetchConversionQueue();
+                  }}
+                  disabled={conversionsLoading || conversionQueueLoading}
+                >
+                  <FiRefreshCw /> Refresh
+                </SelectionButton>
+                <SelectionButton
+                  variant="secondary"
+                  onClick={() => {
+                    if (window.confirm('Clear the visible conversion history? Playback records are preserved.')) {
+                      clearConversionLogMutation.mutate();
+                    }
+                  }}
+                  disabled={
+                    clearConversionLogMutation.isLoading
+                    || conversionsLoading
+                    || !conversionData?.conversions?.length
+                  }
+                  title="Hide completed conversion records from this admin log"
+                >
+                  <FiArchive /> Clear Log
+                </SelectionButton>
+              </div>
             </div>
 
             <div style={{

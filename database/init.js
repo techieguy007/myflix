@@ -238,6 +238,7 @@ function initializeTables() {
         subtitle_tracks INTEGER DEFAULT 0,
         video_codec TEXT,
         audio_codec TEXT,
+        admin_hidden_at DATETIME,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (movie_id) REFERENCES movies (id)
@@ -247,6 +248,13 @@ function initializeTables() {
         console.error('Error creating media_conversions table:', err);
       } else {
         console.log('Media conversions table ready');
+        db.run('ALTER TABLE media_conversions ADD COLUMN admin_hidden_at DATETIME', (alterErr) => {
+          if (alterErr && !alterErr.message.includes('duplicate column name')) {
+            console.error('Error adding media_conversions admin_hidden_at column:', alterErr);
+          } else if (!alterErr) {
+            console.log('Added media_conversions admin_hidden_at column');
+          }
+        });
       }
     });
 

@@ -114,6 +114,16 @@ function publicLibraryRow(row) {
   return publicRow;
 }
 
+async function ensureConversionLogSchema() {
+  try {
+    await db.run('ALTER TABLE media_conversions ADD COLUMN admin_hidden_at DATETIME');
+  } catch (error) {
+    if (!String(error.message || '').includes('duplicate column name')) {
+      throw error;
+    }
+  }
+}
+
 router.get('/', optionalAuth, async (req, res) => {
   try {
     const rows = await db.all(`
@@ -229,6 +239,7 @@ router.get('/scan/status', authenticateToken, requireAdmin, (req, res) => {
 
 router.get('/conversions', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    await ensureConversionLogSchema();
     const limit = Math.max(1, Math.min(500, Number(req.query.limit || 100)));
     const rows = await db.all(`
       SELECT
@@ -238,12 +249,14 @@ router.get('/conversions', authenticateToken, requireAdmin, async (req, res) => 
         m.video_path AS current_video_path
       FROM media_conversions c
       LEFT JOIN movies m ON m.id = c.movie_id
+      WHERE c.admin_hidden_at IS NULL
       ORDER BY c.updated_at DESC, c.id DESC
       LIMIT ?
     `, [limit]);
     const summaryRows = await db.all(`
       SELECT status, COUNT(*) AS count
       FROM media_conversions
+      WHERE admin_hidden_at IS NULL
       GROUP BY status
     `);
     const summary = summaryRows.reduce((acc, row) => {
@@ -257,6 +270,12 @@ router.get('/conversions', authenticateToken, requireAdmin, async (req, res) => 
         COALESCE(SUM(CASE WHEN status = 'prepared-kept' THEN 1 ELSE 0 END), 0) AS originalsKept,
         COALESCE(SUM(CASE WHEN replacement_path IS NOT NULL THEN replacement_size ELSE 0 END), 0) AS convertedBytes
       FROM media_conversions
+      WHERE admin_hidden_at IS NULL
+    `);
+    const archived = await db.get(`
+      SELECT COUNT(*) AS total
+      FROM media_conversions
+      WHERE admin_hidden_at IS NOT NULL
     `);
 
     logger.info('library.conversions_requested', {
@@ -268,7 +287,8 @@ router.get('/conversions', authenticateToken, requireAdmin, async (req, res) => 
     res.json({
       conversions: rows,
       summary,
-      totals
+      totals,
+      archived: archived?.total || 0
     });
   } catch (error) {
     logger.error('library.conversions_failed', {
@@ -277,6 +297,36 @@ router.get('/conversions', authenticateToken, requireAdmin, async (req, res) => 
       error
     });
     res.status(500).json({ error: 'Failed to fetch conversion history' });
+  }
+});
+
+router.delete('/conversions', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    await ensureConversionLogSchema();
+    const result = await db.run(`
+      UPDATE media_conversions
+      SET admin_hidden_at = CURRENT_TIMESTAMP,
+          updated_at = updated_at
+      WHERE admin_hidden_at IS NULL
+    `);
+
+    logger.info('library.conversions_cleared', {
+      requestId: req.requestId,
+      userId: req.user && (req.user.userId || req.user.id),
+      hidden: result.changes || 0
+    });
+
+    res.json({
+      hidden: result.changes || 0,
+      message: 'Conversion log cleared'
+    });
+  } catch (error) {
+    logger.error('library.conversions_clear_failed', {
+      requestId: req.requestId,
+      userId: req.user && (req.user.userId || req.user.id),
+      error
+    });
+    res.status(500).json({ error: 'Failed to clear conversion history' });
   }
 });
 
