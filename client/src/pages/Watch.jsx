@@ -21,6 +21,16 @@ function shouldPreferCompatiblePlayback() {
   return !isLocalHost || /Android|iPhone|iPad|iPod|Mobile|EdgA|CriOS|FxiOS/i.test(userAgent);
 }
 
+function scrollPageToTop() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
+}
+
 const Container = styled.div`
   min-height: 100vh;
   background: #000;
@@ -518,6 +528,17 @@ const Watch = () => {
   const streamOffsetRef = useRef(0);
   const playbackRequestRef = useRef(0);
   const pendingSubtitleFileRef = useRef(null);
+
+  useEffect(() => {
+    scrollPageToTop();
+    const frameId = window.requestAnimationFrame(scrollPageToTop);
+    const timerId = window.setTimeout(scrollPageToTop, 150);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.clearTimeout(timerId);
+    };
+  }, [id]);
 
   const reservePlaybackRequest = useCallback(() => {
     playbackRequestRef.current += 1;
