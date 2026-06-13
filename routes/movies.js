@@ -107,6 +107,75 @@ router.get('/', optionalAuth, async (req, res) => {
   }
 });
 
+// Get user's favorite movies
+router.get('/user/favorites', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { page = 1, limit = 200 } = req.query;
+    const offset = (page - 1) * limit;
+
+    const movies = await db.all(
+      `SELECT m.id, m.title, m.description, m.genre, m.release_year, m.duration, m.rating, m.director,
+              m."cast", m.thumbnail, m.poster_url, m.imdb_rating, m.runtime, m.rated, m.media_type,
+              m.series_title, m.season_number, m.episode_number, m.episode_title, m.video_path,
+              f.created_at as favorited_at
+       FROM favorites f
+       JOIN movies m ON f.movie_id = m.id
+       WHERE f.user_id = ?
+       ORDER BY f.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [userId, parseInt(limit), parseInt(offset)]
+    );
+
+    const availableMovies = movies.filter(hasExistingVideoFile).map(publicMovieFields);
+
+    const countResult = await db.get(
+      'SELECT COUNT(*) as total FROM favorites WHERE user_id = ?',
+      [userId]
+    );
+
+    res.json({
+      movies: availableMovies,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: countResult.total,
+        pages: Math.ceil(countResult.total / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get favorites error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get continue watching movies
+router.get('/user/continue-watching', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    const movies = await db.all(
+      `SELECT m.id, m.title, m.description, m.genre, m.release_year, m.duration, m.rating, m.director,
+              m."cast", m.thumbnail, m.poster_url, m.imdb_rating, m.runtime, m.rated, m.media_type,
+              m.series_title, m.season_number, m.episode_number, m.episode_title, m.video_path,
+              wh.watch_time, wh.last_watched
+       FROM watch_history wh
+       JOIN movies m ON wh.movie_id = m.id
+       WHERE wh.user_id = ? AND wh.completed = 0 AND wh.watch_time > 0
+       ORDER BY wh.last_watched DESC
+       LIMIT 20`,
+      [userId]
+    );
+
+    res.json(movies.filter(hasExistingVideoFile).map(publicMovieFields));
+
+  } catch (error) {
+    console.error('Get continue watching error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Get single movie by ID
 router.get('/:id', optionalAuth, async (req, res) => {
   try {
@@ -247,40 +316,6 @@ router.delete('/:id/favorite', authenticateToken, async (req, res) => {
   }
 });
 
-// Get user's favorite movies
-router.get('/user/favorites', authenticateToken, async (req, res) => {
-  try {
-    const userId = req.user.userId;
-    const { page = 1, limit = 20 } = req.query;
-    const offset = (page - 1) * limit;
-
-    const movies = await db.all(
-      `SELECT m.id, m.title, m.description, m.genre, m.release_year, m.duration, m.rating, m.director, m."cast", m.thumbnail, m.format, m.resolution, f.created_at as favorited_at FROM favorites f JOIN movies m ON f.movie_id = m.id WHERE f.user_id = ? ORDER BY f.created_at DESC LIMIT ? OFFSET ?`,
-      [userId, parseInt(limit), parseInt(offset)]
-    );
-
-    // Get total count
-    const countResult = await db.get(
-      'SELECT COUNT(*) as total FROM favorites WHERE user_id = ?',
-      [userId]
-    );
-
-    res.json({
-      movies,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total: countResult.total,
-        pages: Math.ceil(countResult.total / limit)
-      }
-    });
-
-  } catch (error) {
-    console.error('Get favorites error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
 // Update watch progress
 router.post('/:id/progress', authenticateToken, async (req, res) => {
   try {
@@ -308,24 +343,6 @@ router.post('/:id/progress', authenticateToken, async (req, res) => {
 
   } catch (error) {
     console.error('Update progress error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Get continue watching movies
-router.get('/user/continue-watching', authenticateToken, async (req, res) => {
-  try {
-    const userId = req.user.userId;
-
-    const movies = await db.all(
-      `SELECT m.id, m.title, m.description, m.genre, m.release_year, m.duration, m.rating, m.director, m."cast", m.thumbnail, m.format, m.resolution, wh.watch_time, wh.last_watched FROM watch_history wh JOIN movies m ON wh.movie_id = m.id WHERE wh.user_id = ? AND wh.completed = 0 AND wh.watch_time > 0 ORDER BY wh.last_watched DESC LIMIT 10`,
-      [userId]
-    );
-
-    res.json(movies);
-
-  } catch (error) {
-    console.error('Get continue watching error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

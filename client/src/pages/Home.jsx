@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import styled from 'styled-components';
 import { motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
@@ -219,6 +219,10 @@ const features = [
 
 const Home = () => {
   const { isAuthenticated } = useAuth();
+
+  if (isAuthenticated) {
+    return <Navigate to="/browse" replace />;
+  }
 
   const containerVariants = {
     initial: { opacity: 0, y: 50 },

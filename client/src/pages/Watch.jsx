@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import styled from 'styled-components';
-import { FiArrowLeft, FiDownload, FiPlay, FiPause, FiMaximize2, FiSearch, FiType, FiVolume2 } from 'react-icons/fi';
+import { FiArrowLeft, FiCheck, FiDownload, FiHeart, FiPlay, FiPause, FiMaximize2, FiSearch, FiType, FiVolume2 } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import Hls from 'hls.js';
 import api from '../utils/api';
@@ -295,8 +295,8 @@ const SubtitleContainer = styled.div`
 `;
 
 const MovieInfo = styled.div`
-  padding: 2rem;
-  max-width: 800px;
+  padding: 2.2rem 4vw 4rem;
+  max-width: 980px;
 `;
 
 const MovieTitle = styled.h1`
@@ -390,6 +390,43 @@ const MovieDescription = styled.p`
   color: ${({ theme }) => theme.colors.text};
   line-height: 1.6;
   font-size: 1.1rem;
+  max-width: 760px;
+`;
+
+const DetailActions = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0.35rem 0 1.25rem;
+`;
+
+const DetailActionButton = styled.button`
+  min-height: 2.45rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.9rem;
+  background: rgba(255, 255, 255, 0.12);
+  color: ${({ theme }) => theme.colors.text};
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  font-weight: 800;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+`;
+
+const PlaybackPill = styled.span`
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: rgba(70, 211, 105, 0.12);
+  border: 1px solid rgba(70, 211, 105, 0.24);
+  color: ${({ theme }) => theme.colors.success};
+  padding: 0.25rem 0.65rem;
+  font-size: 0.82rem;
+  font-weight: 800;
 `;
 
 const ErrorMessage = styled.div`
@@ -1333,6 +1370,23 @@ const Watch = () => {
     navigate(`/watch/${nextEpisodeId}?autoplay=1`);
   };
 
+  const handleFavoriteToggle = async () => {
+    if (!movie) return;
+
+    const wasFavorite = Boolean(movie.isFavorite);
+    setMovie((current) => current ? { ...current, isFavorite: !wasFavorite } : current);
+
+    try {
+      if (wasFavorite) {
+        await api.delete(`/api/movies/${movie.id}/favorite`);
+      } else {
+        await api.post(`/api/movies/${movie.id}/favorite`);
+      }
+    } catch (favoriteError) {
+      setMovie((current) => current ? { ...current, isFavorite: wasFavorite } : current);
+    }
+  };
+
   if (loading) {
     return <LoadingSpinner fullScreen text="Loading movie..." />;
   }
@@ -1736,6 +1790,21 @@ const Watch = () => {
           {movie.duration && <span>{Math.floor(movie.duration / 60)} min</span>}
           {movie.rating && <span>⭐ {movie.rating}/10</span>}
         </MovieMeta>
+        <DetailActions>
+          <DetailActionButton type="button" onClick={handleFavoriteToggle}>
+            {movie.isFavorite ? <FiCheck /> : <FiHeart />}
+            {movie.isFavorite ? 'In My List' : 'Add to My List'}
+          </DetailActionButton>
+          {playbackInfo?.streamMode === 'prepared' && (
+            <PlaybackPill>Ready for direct play</PlaybackPill>
+          )}
+          {playbackInfo?.streamMode === 'preparing' && (
+            <PlaybackPill>Preparing mobile-safe MP4</PlaybackPill>
+          )}
+          {playbackInfo?.streamMode === 'hls' && (
+            <PlaybackPill>Temporary stream</PlaybackPill>
+          )}
+        </DetailActions>
         {seriesNavigation && selectedSeason && (
           <SeriesNavigation>
             <SeriesSelectGroup>
