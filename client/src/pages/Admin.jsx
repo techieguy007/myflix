@@ -622,6 +622,36 @@ const queueStatusStyle = (status) => {
   }
 };
 
+const formatQueueReason = (value) => {
+  switch (value) {
+    case 'transcode-gpu-cuda-strict-mobile':
+      return 'GPU encode + CUDA decode';
+    case 'transcode-gpu-nvenc-cpu-decode-strict-mobile':
+      return 'GPU encode, CPU decode fallback';
+    case 'transcode-cpu-strict-mobile':
+      return 'CPU encode fallback';
+    case 'GPU encode failed; retrying with CPU':
+      return 'GPU failed, retrying CPU encode';
+    case 'CUDA decode failed; retrying NVENC with CPU decode':
+      return 'CUDA decode failed, retrying GPU encode';
+    default:
+      return value || '';
+  }
+};
+
+const formatEncoderName = (value) => {
+  switch (value) {
+    case 'h264_nvenc':
+      return 'NVENC GPU';
+    case 'libx264':
+      return 'CPU x264';
+    case 'copy':
+      return 'Copy';
+    default:
+      return value || '';
+  }
+};
+
 const Admin = () => {
   const [activeTab, setActiveTab] = useState('scan');
   const [selectedFile, setSelectedFile] = useState(null);
@@ -1948,8 +1978,9 @@ const Admin = () => {
                     {formatPercent(conversionQueue.active.progress_percent)}
                     {conversionQueue.active.speed ? ` - ${conversionQueue.active.speed}` : ''}
                     {conversionQueue.active.encoder_used
-                      ? ` - Actual: ${conversionQueue.active.encoder_used}`
+                      ? ` - Actual: ${formatEncoderName(conversionQueue.active.encoder_used)}`
                       : ` - Requested: ${conversionQueue.active.encoder_preference || 'auto'}`}
+                    {conversionQueue.active.reason ? ` - ${formatQueueReason(conversionQueue.active.reason)}` : ''}
                   </div>
                 </div>
               )}
@@ -2009,14 +2040,14 @@ const Admin = () => {
                             <span style={{ color: status.color, fontWeight: 700 }}>{status.label}</span>
                             {(job.error || job.reason) && (
                               <div style={{ color: '#888', fontSize: '0.8rem', marginTop: '0.25rem' }}>
-                                {job.error || job.reason}
+                                {job.error || formatQueueReason(job.reason)}
                               </div>
                             )}
                           </td>
                           <td style={{ padding: '0.9rem', color: '#b3b3b3' }}>
                             <div>
                               {job.encoder_used
-                                ? `Actual: ${job.encoder_used}`
+                                ? `Actual: ${formatEncoderName(job.encoder_used)}`
                                 : (job.status === 'running' ? 'Starting encoder...' : 'Not started')}
                             </div>
                             <div style={{ color: '#777', fontSize: '0.8rem', marginTop: '0.25rem' }}>
