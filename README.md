@@ -312,7 +312,7 @@ For another device on the same network, use the host machine's LAN IP with port 
 
 ### 👤 User Management
 - **Multi-User Support** - Individual accounts with separate watch histories
-- **Admin Panel** - Upload and manage movies, user administration
+- **Admin Panel** - Upload and manage movies, create users, edit profiles, reset passwords, and manage viewing history
 - **Watch Progress** - Individual progress tracking per user
 - **Favorites** - Personal movie favorites list
 - **Continue Watching** - Quick access to partially watched content

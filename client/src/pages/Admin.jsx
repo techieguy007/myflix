@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import styled from 'styled-components';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -17,7 +17,10 @@ import {
   FiPlay,
   FiPause,
   FiUsers,
-  FiArchive
+  FiArchive,
+  FiUserPlus,
+  FiClock,
+  FiEye
 } from 'react-icons/fi';
 import api from '../utils/api';
 
@@ -499,6 +502,16 @@ const formatRuntime = (seconds) => {
   return remainingMinutes ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
 };
 
+const formatWatchDuration = (seconds) => {
+  const value = Number(seconds || 0);
+  if (!Number.isFinite(value) || value <= 0) return '0 min';
+  const minutes = Math.max(1, Math.round(value / 60));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+};
+
 const formatEpisodeCode = (item) => {
   if (!isEpisode(item)) return null;
 
@@ -535,6 +548,22 @@ const buildSecondaryMeta = (item) => {
   if (item.imdb_rating) parts.push(`IMDb ${item.imdb_rating}`);
 
   return parts.join(' - ');
+};
+
+const buildHistoryTitle = (item) => {
+  if (item.mediaType === 'episode') {
+    const season = Number(item.seasonNumber);
+    const episode = Number(item.episodeNumber);
+    const code = season && episode
+      ? `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`
+      : null;
+    return [
+      item.seriesTitle || item.title,
+      code,
+      item.episodeTitle && item.episodeTitle !== item.title ? item.episodeTitle : null
+    ].filter(Boolean).join(' - ');
+  }
+  return item.title;
 };
 
 const formatPercent = (value) => {
@@ -576,6 +605,16 @@ const Admin = () => {
   const [conversionDialog, setConversionDialog] = useState(null);
   const [isConverting, setIsConverting] = useState(false);
   const [conversionProgress, setConversionProgress] = useState(null);
+  const [selectedUserId, setSelectedUserId] = useState(null);
+  const [showUserModal, setShowUserModal] = useState(false);
+  const [editingUserId, setEditingUserId] = useState(null);
+  const [userForm, setUserForm] = useState({
+    username: '',
+    email: '',
+    password: '',
+    profilePicture: '',
+    isAdmin: false
+  });
   const queryClient = useQueryClient();
 
   // Fetch movies
@@ -638,6 +677,49 @@ const Admin = () => {
     enabled: activeTab === 'sessions',
     refetchInterval: activeTab === 'sessions' ? 15000 : false
   });
+
+  const {
+    data: userData,
+    isLoading: usersLoading,
+    refetch: refetchUsers
+  } = useQuery({
+    queryKey: ['admin-users'],
+    queryFn: async () => {
+      const response = await api.get('/api/auth/users');
+      return response.data;
+    },
+    enabled: activeTab === 'users'
+  });
+
+  const users = useMemo(() => userData?.users || [], [userData]);
+  const selectedUser = useMemo(
+    () => users.find((user) => Number(user.id) === Number(selectedUserId)) || null,
+    [selectedUserId, users]
+  );
+
+  const {
+    data: selectedUserHistory,
+    isLoading: selectedUserHistoryLoading,
+    refetch: refetchSelectedUserHistory
+  } = useQuery({
+    queryKey: ['admin-user-history', selectedUserId],
+    queryFn: async () => {
+      const response = await api.get(`/api/auth/users/${selectedUserId}/history?limit=100`);
+      return response.data;
+    },
+    enabled: activeTab === 'users' && Boolean(selectedUserId)
+  });
+
+  useEffect(() => {
+    if (activeTab !== 'users') return;
+    if (!users.length) {
+      if (selectedUserId) setSelectedUserId(null);
+      return;
+    }
+    if (!selectedUserId || !users.some((user) => Number(user.id) === Number(selectedUserId))) {
+      setSelectedUserId(users[0].id);
+    }
+  }, [activeTab, selectedUserId, users]);
 
   // Delete movie mutation
   const deleteMovieMutation = useMutation({
@@ -800,6 +882,88 @@ const Admin = () => {
     }
   });
 
+  const createUserMutation = useMutation({
+    mutationFn: async (payload) => {
+      const response = await api.post('/api/auth/users', payload);
+      return response.data;
+    },
+    onSuccess: (data) => {
+      toast.success('User created');
+      setShowUserModal(false);
+      setEditingUserId(null);
+      setSelectedUserId(data?.user?.id || null);
+      queryClient.invalidateQueries(['admin-users']);
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.error || 'Failed to create user');
+    }
+  });
+
+  const updateUserMutation = useMutation({
+    mutationFn: async ({ userId, payload }) => {
+      const response = await api.put(`/api/auth/users/${userId}`, payload);
+      return response.data;
+    },
+    onSuccess: (data) => {
+      toast.success('User profile updated');
+      setShowUserModal(false);
+      setEditingUserId(null);
+      setSelectedUserId(data?.user?.id || selectedUserId);
+      queryClient.invalidateQueries(['admin-users']);
+      queryClient.invalidateQueries(['admin-user-history', data?.user?.id || selectedUserId]);
+      queryClient.invalidateQueries(['admin-sessions']);
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.error || 'Failed to update user');
+    }
+  });
+
+  const deleteUserMutation = useMutation({
+    mutationFn: async (userId) => {
+      const response = await api.delete(`/api/auth/users/${userId}`);
+      return response.data;
+    },
+    onSuccess: (data) => {
+      toast.success(`Deleted user ${data?.username || ''}`.trim());
+      setSelectedUserId(null);
+      queryClient.invalidateQueries(['admin-users']);
+      queryClient.invalidateQueries(['admin-sessions']);
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.error || 'Failed to delete user');
+    }
+  });
+
+  const clearUserHistoryMutation = useMutation({
+    mutationFn: async (userId) => {
+      const response = await api.delete(`/api/auth/users/${userId}/history`);
+      return response.data;
+    },
+    onSuccess: (data) => {
+      toast.success(`Cleared ${data?.cleared || 0} history item(s)`);
+      queryClient.invalidateQueries(['admin-users']);
+      queryClient.invalidateQueries(['admin-user-history', selectedUserId]);
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.error || 'Failed to clear viewing history');
+    }
+  });
+
+  const removeUserHistoryItemMutation = useMutation({
+    mutationFn: async ({ userId, movieId }) => {
+      const response = await api.delete(`/api/auth/users/${userId}/history/${movieId}`);
+      return response.data;
+    },
+    onSuccess: (data) => {
+      toast.success(`Removed ${data?.removed || 0} history item(s)`);
+      queryClient.invalidateQueries(['admin-users']);
+      queryClient.invalidateQueries(['admin-user-history', selectedUserId]);
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.error || 'Failed to remove viewing history item');
+    }
+  });
+
   const handleFileSelect = (event) => {
     const file = event.target.files[0];
     if (file) {
@@ -868,6 +1032,78 @@ const Admin = () => {
 
   const handleModalInputChange = (field, value) => {
     setEditingMovie(prev => ({ ...prev, [field]: value }));
+  };
+
+  const resetUserForm = () => {
+    setUserForm({
+      username: '',
+      email: '',
+      password: '',
+      profilePicture: '',
+      isAdmin: false
+    });
+  };
+
+  const handleAddUser = () => {
+    setEditingUserId(null);
+    resetUserForm();
+    setShowUserModal(true);
+  };
+
+  const handleEditUser = (user) => {
+    setEditingUserId(user.id);
+    setUserForm({
+      username: user.username || '',
+      email: user.email || '',
+      password: '',
+      profilePicture: user.profilePicture || '',
+      isAdmin: Boolean(user.isAdmin)
+    });
+    setShowUserModal(true);
+  };
+
+  const handleUserFormChange = (field, value) => {
+    setUserForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSaveUser = (event) => {
+    event.preventDefault();
+    const payload = {
+      username: userForm.username.trim(),
+      email: userForm.email.trim(),
+      profilePicture: userForm.profilePicture.trim(),
+      isAdmin: Boolean(userForm.isAdmin)
+    };
+    if (userForm.password) {
+      payload.password = userForm.password;
+    }
+
+    if (editingUserId) {
+      updateUserMutation.mutate({ userId: editingUserId, payload });
+    } else {
+      createUserMutation.mutate({ ...payload, password: userForm.password });
+    }
+  };
+
+  const handleClearUserHistory = (user) => {
+    if (!user) return;
+    const confirmMessage = `Clear all viewing history for ${user.username}? This removes continue-watching progress for that user.`;
+    if (window.confirm(confirmMessage)) {
+      clearUserHistoryMutation.mutate(user.id);
+    }
+  };
+
+  const handleDeleteUser = (user) => {
+    if (!user) return;
+    const confirmMessage = `Delete user ${user.username}? This removes their sessions, favorites, and viewing history. Library files are not affected.`;
+    if (window.confirm(confirmMessage)) {
+      deleteUserMutation.mutate(user.id);
+    }
+  };
+
+  const handleRemoveHistoryItem = (item) => {
+    if (!selectedUserId || !item?.movieId) return;
+    removeUserHistoryItemMutation.mutate({ userId: selectedUserId, movieId: item.movieId });
   };
 
   const handleToggleSelection = (movieId) => {
@@ -1087,6 +1323,12 @@ const Admin = () => {
           onClick={() => handleTabChange('conversions')}
         >
           Conversions
+        </Tab>
+        <Tab
+          active={activeTab === 'users'}
+          onClick={() => handleTabChange('users')}
+        >
+          Users
         </Tab>
         <Tab
           active={activeTab === 'sessions'}
@@ -1863,6 +2105,271 @@ const Admin = () => {
           </div>
         )}
 
+        {activeTab === 'users' && (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '2rem', flexWrap: 'wrap' }}>
+              <div>
+                <h2 style={{ color: 'white', fontSize: '1.5rem', margin: 0 }}>
+                  Users
+                </h2>
+                <p style={{ color: '#b3b3b3', marginTop: '0.5rem' }}>
+                  Add profiles, update access, and maintain viewing history for every MyFlix user.
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <SelectionButton
+                  variant="secondary"
+                  onClick={() => {
+                    refetchUsers();
+                    if (selectedUserId) refetchSelectedUserHistory();
+                  }}
+                  disabled={usersLoading || selectedUserHistoryLoading}
+                >
+                  <FiRefreshCw /> Refresh
+                </SelectionButton>
+                <SelectionButton
+                  variant="primary"
+                  onClick={handleAddUser}
+                >
+                  <FiUserPlus /> Add User
+                </SelectionButton>
+              </div>
+            </div>
+
+            {usersLoading ? (
+              <div style={{ textAlign: 'center', padding: '2rem' }}>
+                <LoadingSpinner />
+              </div>
+            ) : (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))',
+                gap: '1.25rem',
+                alignItems: 'start'
+              }}>
+                <div style={{
+                  background: '#222',
+                  border: '1px solid #333',
+                  borderRadius: '8px',
+                  overflow: 'hidden'
+                }}>
+                  {!users.length ? (
+                    <div style={{ padding: '2rem', color: '#999', textAlign: 'center' }}>
+                      No users found.
+                    </div>
+                  ) : users.map((user) => {
+                    const active = Number(user.id) === Number(selectedUserId);
+                    return (
+                      <button
+                        key={user.id}
+                        type="button"
+                        onClick={() => setSelectedUserId(user.id)}
+                        style={{
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '1rem',
+                          background: active ? '#2f2f2f' : 'transparent',
+                          border: 'none',
+                          borderBottom: '1px solid #333',
+                          color: 'white',
+                          display: 'flex',
+                          gap: '0.85rem',
+                          alignItems: 'center'
+                        }}
+                      >
+                        <div style={{
+                          width: '42px',
+                          height: '42px',
+                          borderRadius: '50%',
+                          background: active ? '#e50914' : '#444',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontWeight: 800,
+                          overflow: 'hidden',
+                          flex: '0 0 42px'
+                        }}>
+                          {user.profilePicture ? (
+                            <img src={user.profilePicture} alt={user.username} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            String(user.username || '?').charAt(0).toUpperCase()
+                          )}
+                        </div>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {user.username}
+                          </div>
+                          <div style={{ color: '#999', fontSize: '0.82rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {user.email}
+                          </div>
+                          <div style={{ color: '#777', fontSize: '0.78rem', marginTop: '0.25rem' }}>
+                            {user.watchCount || 0} watched - {user.activeSessions || 0} active session(s)
+                          </div>
+                        </div>
+                        {user.isAdmin && (
+                          <span style={{ color: '#46d369', fontSize: '0.75rem', fontWeight: 800 }}>ADMIN</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div>
+                  {selectedUser ? (
+                    <>
+                      <div style={{
+                        background: '#222',
+                        border: '1px solid #333',
+                        borderRadius: '8px',
+                        padding: '1rem',
+                        marginBottom: '1.25rem'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+                          <div>
+                            <h3 style={{ color: 'white', margin: 0 }}>{selectedUser.username}</h3>
+                            <p style={{ color: '#999', marginTop: '0.35rem', marginBottom: 0 }}>
+                              {selectedUser.email} - Created {formatDateTime(selectedUser.createdAt)}
+                            </p>
+                          </div>
+                          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                            <SelectionButton
+                              variant="secondary"
+                              onClick={() => handleEditUser(selectedUser)}
+                            >
+                              <FiEdit /> Edit Profile
+                            </SelectionButton>
+                            <SelectionButton
+                              variant="danger"
+                              onClick={() => handleClearUserHistory(selectedUser)}
+                              disabled={clearUserHistoryMutation.isLoading || !selectedUserHistory?.history?.length}
+                            >
+                              <FiTrash2 /> Clear History
+                            </SelectionButton>
+                            <SelectionButton
+                              variant="danger"
+                              onClick={() => handleDeleteUser(selectedUser)}
+                              disabled={deleteUserMutation.isLoading}
+                            >
+                              <FiX /> Delete User
+                            </SelectionButton>
+                          </div>
+                        </div>
+
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                          gap: '1rem'
+                        }}>
+                          {[
+                            ['Watched', selectedUser.watchCount || 0],
+                            ['Completed', selectedUser.completedCount || 0],
+                            ['Watch Time', formatWatchDuration(selectedUser.totalWatchSeconds)],
+                            ['Favorites', selectedUser.favoriteCount || 0],
+                            ['Sessions', selectedUser.activeSessions || 0]
+                          ].map(([label, value]) => (
+                            <div key={label} style={{ background: '#1a1a1a', border: '1px solid #333', borderRadius: '6px', padding: '0.85rem' }}>
+                              <div style={{ color: '#999', fontSize: '0.8rem' }}>{label}</div>
+                              <div style={{ color: 'white', fontSize: '1.2rem', fontWeight: 800 }}>{value}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div style={{
+                        background: '#222',
+                        border: '1px solid #333',
+                        borderRadius: '8px',
+                        overflow: 'hidden'
+                      }}>
+                        <div style={{ padding: '1rem', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+                          <div>
+                            <h3 style={{ color: 'white', margin: 0 }}>Viewing History</h3>
+                            <div style={{ color: '#999', fontSize: '0.85rem', marginTop: '0.25rem' }}>
+                              {selectedUserHistory?.stats?.entries || 0} item(s), {formatWatchDuration(selectedUserHistory?.stats?.totalWatchSeconds)}
+                            </div>
+                          </div>
+                          <div style={{ color: '#999', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <FiClock /> Last watched {formatDateTime(selectedUserHistory?.stats?.lastWatched)}
+                          </div>
+                        </div>
+
+                        {selectedUserHistoryLoading ? (
+                          <div style={{ textAlign: 'center', padding: '2rem' }}>
+                            <LoadingSpinner />
+                          </div>
+                        ) : !selectedUserHistory?.history?.length ? (
+                          <div style={{ padding: '3rem', color: '#999', textAlign: 'center' }}>
+                            No viewing history for this user yet.
+                          </div>
+                        ) : (
+                          <div style={{ overflowX: 'auto' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '760px' }}>
+                              <thead>
+                                <tr style={{ background: '#1a1a1a', color: '#b3b3b3', textAlign: 'left' }}>
+                                  <th style={{ padding: '0.9rem' }}>Title</th>
+                                  <th style={{ padding: '0.9rem' }}>Progress</th>
+                                  <th style={{ padding: '0.9rem' }}>Status</th>
+                                  <th style={{ padding: '0.9rem' }}>Last Watched</th>
+                                  <th style={{ padding: '0.9rem' }}>Action</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {selectedUserHistory.history.map((item) => {
+                                  const progress = Number(item.duration || 0) > 0
+                                    ? Math.min(100, Math.round((Number(item.watchTime || 0) / Number(item.duration)) * 100))
+                                    : null;
+                                  return (
+                                    <tr key={`${item.movieId}-${item.lastWatched}`} style={{ borderTop: '1px solid #333', color: '#ddd', verticalAlign: 'top' }}>
+                                      <td style={{ padding: '0.9rem', fontWeight: 700 }}>
+                                        {buildHistoryTitle(item)}
+                                        <div style={{ color: '#777', fontSize: '0.8rem', marginTop: '0.25rem' }}>
+                                          {item.mediaType === 'episode' ? 'Episode' : 'Movie'} {item.releaseYear ? `- ${item.releaseYear}` : ''} {item.rated ? `- ${item.rated}` : ''}
+                                        </div>
+                                      </td>
+                                      <td style={{ padding: '0.9rem', color: '#b3b3b3' }}>
+                                        {formatWatchDuration(item.watchTime)}
+                                        {progress !== null && (
+                                          <div style={{ marginTop: '0.35rem', height: '6px', background: '#333', borderRadius: '999px', overflow: 'hidden' }}>
+                                            <div style={{ width: `${progress}%`, height: '100%', background: '#e50914' }} />
+                                          </div>
+                                        )}
+                                      </td>
+                                      <td style={{ padding: '0.9rem', color: item.completed ? '#46d369' : '#f5c542', fontWeight: 700 }}>
+                                        {item.completed ? 'Completed' : 'In Progress'}
+                                      </td>
+                                      <td style={{ padding: '0.9rem', color: '#b3b3b3' }}>
+                                        {formatDateTime(item.lastWatched)}
+                                      </td>
+                                      <td style={{ padding: '0.9rem' }}>
+                                        <SelectionButton
+                                          variant="secondary"
+                                          onClick={() => handleRemoveHistoryItem(item)}
+                                          disabled={removeUserHistoryItemMutation.isLoading}
+                                        >
+                                          <FiX /> Remove
+                                        </SelectionButton>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ padding: '3rem', color: '#999', background: '#222', border: '1px solid #333', borderRadius: '8px', textAlign: 'center' }}>
+                      <FiEye style={{ marginBottom: '0.75rem' }} />
+                      <div>Select or add a user to manage profiles and viewing history.</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {activeTab === 'sessions' && (
           <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '2rem', flexWrap: 'wrap' }}>
@@ -2087,6 +2594,104 @@ const Admin = () => {
                     disabled={updateMovieMutation.isLoading}
                   >
                     {updateMovieMutation.isLoading ? <LoadingSpinner /> : 'Update Movie'}
+                  </Button>
+                </ButtonGroup>
+              </form>
+            </ModalContent>
+          </Modal>
+        )}
+
+        {showUserModal && (
+          <Modal
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShowUserModal(false)}
+          >
+            <ModalContent
+              initial={{ scale: 0.8, y: 50 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.8, y: 50 }}
+              onClick={(event) => event.stopPropagation()}
+              style={{ maxWidth: '560px' }}
+            >
+              <ModalHeader>
+                <ModalTitle>{editingUserId ? 'Edit User' : 'Add User'}</ModalTitle>
+                <CloseButton onClick={() => setShowUserModal(false)}>
+                  <FiX />
+                </CloseButton>
+              </ModalHeader>
+
+              <form onSubmit={handleSaveUser}>
+                <FormGroup>
+                  <Label>Username</Label>
+                  <Input
+                    type="text"
+                    value={userForm.username}
+                    onChange={(event) => handleUserFormChange('username', event.target.value)}
+                    autoComplete="off"
+                    required
+                  />
+                </FormGroup>
+
+                <FormGroup>
+                  <Label>Email</Label>
+                  <Input
+                    type="email"
+                    value={userForm.email}
+                    onChange={(event) => handleUserFormChange('email', event.target.value)}
+                    autoComplete="off"
+                    required
+                  />
+                </FormGroup>
+
+                <FormGroup>
+                  <Label>{editingUserId ? 'New Password' : 'Password'}</Label>
+                  <Input
+                    type="password"
+                    value={userForm.password}
+                    onChange={(event) => handleUserFormChange('password', event.target.value)}
+                    autoComplete="new-password"
+                    placeholder={editingUserId ? 'Leave blank to keep current password' : 'At least 6 characters'}
+                    required={!editingUserId}
+                  />
+                </FormGroup>
+
+                <FormGroup>
+                  <Label>Profile Image URL</Label>
+                  <Input
+                    type="text"
+                    value={userForm.profilePicture}
+                    onChange={(event) => handleUserFormChange('profilePicture', event.target.value)}
+                    placeholder="Optional image URL"
+                  />
+                </FormGroup>
+
+                <FormGroup>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', color: 'white', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={userForm.isAdmin}
+                      onChange={(event) => handleUserFormChange('isAdmin', event.target.checked)}
+                      style={{ width: '18px', height: '18px' }}
+                    />
+                    Admin access
+                  </label>
+                  <div style={{ color: '#999', fontSize: '0.82rem', marginTop: '0.35rem' }}>
+                    Admin users can manage library scans, conversions, sessions, and other users.
+                  </div>
+                </FormGroup>
+
+                <ButtonGroup>
+                  <Button type="button" onClick={() => setShowUserModal(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    disabled={createUserMutation.isLoading || updateUserMutation.isLoading}
+                  >
+                    {createUserMutation.isLoading || updateUserMutation.isLoading ? <LoadingSpinner /> : (editingUserId ? 'Update User' : 'Create User')}
                   </Button>
                 </ButtonGroup>
               </form>

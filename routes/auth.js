@@ -25,6 +25,72 @@ function signSessionToken(user, sessionId) {
   );
 }
 
+function publicUserRow(user) {
+  return {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    profilePicture: user.profile_picture,
+    isAdmin: user.is_admin === 1,
+    createdAt: user.created_at,
+    updatedAt: user.updated_at,
+    watchCount: Number(user.watch_count || 0),
+    completedCount: Number(user.completed_count || 0),
+    totalWatchSeconds: Number(user.total_watch_seconds || 0),
+    favoriteCount: Number(user.favorite_count || 0),
+    activeSessions: Number(user.active_sessions || 0),
+    lastWatched: user.last_watched || null
+  };
+}
+
+function validateUserBasics({ username, email }) {
+  if (!username || !String(username).trim()) {
+    return 'Username is required';
+  }
+  if (!email || !String(email).trim()) {
+    return 'Email is required';
+  }
+  if (!String(email).includes('@')) {
+    return 'A valid email is required';
+  }
+  return null;
+}
+
+async function ensureUniqueUserIdentity({ username, email, excludeUserId = null }) {
+  const existingUser = await db.get(
+    `SELECT id, username, email
+     FROM users
+     WHERE (LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?))
+       AND (? IS NULL OR id != ?)`,
+    [username, email, excludeUserId, excludeUserId]
+  );
+
+  if (!existingUser) return null;
+  if (String(existingUser.username).toLowerCase() === String(username).toLowerCase()) {
+    return 'Username already exists';
+  }
+  return 'Email already exists';
+}
+
+async function wouldRemoveLastAdmin(userId, nextIsAdmin) {
+  if (nextIsAdmin) return false;
+  const currentUser = await db.get('SELECT is_admin FROM users WHERE id = ?', [userId]);
+  if (!currentUser || currentUser.is_admin !== 1) return false;
+  const row = await db.get('SELECT COUNT(*) AS count FROM users WHERE is_admin = 1');
+  return Number(row?.count || 0) <= 1;
+}
+
+async function revokeUserSessions(userId, reason) {
+  await db.run(`
+    UPDATE user_sessions
+    SET status = 'revoked',
+        revoke_reason = ?,
+        revoked_at = CURRENT_TIMESTAMP
+    WHERE user_id = ?
+      AND status = 'active'
+  `, [reason, userId]);
+}
+
 // Register new user
 router.post('/register', async (req, res) => {
   try {
@@ -241,6 +307,282 @@ router.put('/profile', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Profile update error:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/users', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const users = await db.all(`
+      SELECT
+        u.id, u.username, u.email, u.profile_picture, u.is_admin, u.created_at, u.updated_at,
+        COALESCE(history.watch_count, 0) AS watch_count,
+        COALESCE(history.total_watch_seconds, 0) AS total_watch_seconds,
+        COALESCE(history.completed_count, 0) AS completed_count,
+        COALESCE(favorites.favorite_count, 0) AS favorite_count,
+        COALESCE(sessions.active_sessions, 0) AS active_sessions,
+        history.last_watched
+      FROM users u
+      LEFT JOIN (
+        SELECT
+          user_id,
+          COUNT(*) AS watch_count,
+          COALESCE(SUM(watch_time), 0) AS total_watch_seconds,
+          COALESCE(SUM(CASE WHEN completed = 1 THEN 1 ELSE 0 END), 0) AS completed_count,
+          MAX(last_watched) AS last_watched
+        FROM watch_history
+        GROUP BY user_id
+      ) history ON history.user_id = u.id
+      LEFT JOIN (
+        SELECT user_id, COUNT(*) AS favorite_count
+        FROM favorites
+        GROUP BY user_id
+      ) favorites ON favorites.user_id = u.id
+      LEFT JOIN (
+        SELECT user_id, COUNT(*) AS active_sessions
+        FROM user_sessions
+        WHERE status = 'active'
+        GROUP BY user_id
+      ) sessions ON sessions.user_id = u.id
+      ORDER BY u.created_at DESC, u.id DESC
+    `);
+
+    res.json({ users: users.map(publicUserRow) });
+  } catch (error) {
+    console.error('Admin users fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+router.post('/users', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const username = String(req.body?.username || '').trim();
+    const email = String(req.body?.email || '').trim();
+    const password = String(req.body?.password || '');
+    const profilePicture = String(req.body?.profilePicture || '').trim() || null;
+    const isAdmin = req.body?.isAdmin === true ? 1 : 0;
+
+    const validationError = validateUserBasics({ username, email });
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters long' });
+    }
+
+    const uniquenessError = await ensureUniqueUserIdentity({ username, email });
+    if (uniquenessError) {
+      return res.status(409).json({ error: uniquenessError });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const result = await db.run(
+      `INSERT INTO users (username, email, password_hash, profile_picture, is_admin)
+       VALUES (?, ?, ?, ?, ?)`,
+      [username, email, passwordHash, profilePicture, isAdmin]
+    );
+    const user = await db.get('SELECT * FROM users WHERE id = ?', [result.id]);
+
+    res.status(201).json({
+      message: 'User created successfully',
+      user: publicUserRow(user)
+    });
+  } catch (error) {
+    console.error('Admin user create error:', error);
+    res.status(500).json({ error: 'Failed to create user' });
+  }
+});
+
+router.put('/users/:id', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ error: 'Invalid user id' });
+    }
+
+    const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const username = String(req.body?.username || user.username).trim();
+    const email = String(req.body?.email || user.email).trim();
+    const profilePicture = req.body?.profilePicture === undefined
+      ? user.profile_picture
+      : (String(req.body.profilePicture || '').trim() || null);
+    const isAdmin = req.body?.isAdmin === true ? 1 : 0;
+    const password = String(req.body?.password || '');
+
+    const validationError = validateUserBasics({ username, email });
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
+    if (password && password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters long' });
+    }
+    if (await wouldRemoveLastAdmin(userId, isAdmin === 1)) {
+      return res.status(400).json({ error: 'Cannot remove admin rights from the last admin user' });
+    }
+
+    const uniquenessError = await ensureUniqueUserIdentity({ username, email, excludeUserId: userId });
+    if (uniquenessError) {
+      return res.status(409).json({ error: uniquenessError });
+    }
+
+    const fields = [
+      'username = ?',
+      'email = ?',
+      'profile_picture = ?',
+      'is_admin = ?',
+      'updated_at = CURRENT_TIMESTAMP'
+    ];
+    const values = [username, email, profilePicture, isAdmin];
+    if (password) {
+      fields.splice(4, 0, 'password_hash = ?');
+      values.push(await bcrypt.hash(password, 10));
+    }
+    values.push(userId);
+
+    await db.run(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, values);
+    if (password || isAdmin !== user.is_admin) {
+      await revokeUserSessions(userId, password ? 'admin-password-reset' : 'admin-role-updated');
+    }
+    const updatedUser = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
+
+    res.json({
+      message: 'User updated successfully',
+      user: publicUserRow(updatedUser)
+    });
+  } catch (error) {
+    console.error('Admin user update error:', error);
+    res.status(500).json({ error: 'Failed to update user' });
+  }
+});
+
+router.delete('/users/:id', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ error: 'Invalid user id' });
+    }
+
+    const user = await db.get('SELECT id, username, is_admin FROM users WHERE id = ?', [userId]);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    if (await wouldRemoveLastAdmin(userId, false)) {
+      return res.status(400).json({ error: 'Cannot delete the last admin user' });
+    }
+
+    await db.run('DELETE FROM watch_history WHERE user_id = ?', [userId]);
+    await db.run('DELETE FROM favorites WHERE user_id = ?', [userId]);
+    await db.run('DELETE FROM user_sessions WHERE user_id = ?', [userId]);
+    const result = await db.run('DELETE FROM users WHERE id = ?', [userId]);
+
+    res.json({
+      deleted: result.changes || 0,
+      username: user.username
+    });
+  } catch (error) {
+    console.error('Admin user delete error:', error);
+    res.status(500).json({ error: 'Failed to delete user' });
+  }
+});
+
+router.get('/users/:id/history', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
+    const limit = Math.max(1, Math.min(500, Number(req.query.limit || 100)));
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ error: 'Invalid user id' });
+    }
+
+    const user = await db.get('SELECT id, username, email, profile_picture, is_admin, created_at, updated_at FROM users WHERE id = ?', [userId]);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const history = await db.all(`
+      SELECT
+        wh.movie_id, wh.watch_time, wh.completed, wh.last_watched,
+        m.title, m.duration, m.poster_url, m.thumbnail, m.media_type, m.series_title,
+        m.season_number, m.episode_number, m.episode_title, m.release_year, m.rated
+      FROM watch_history wh
+      LEFT JOIN movies m ON m.id = wh.movie_id
+      WHERE wh.user_id = ?
+      ORDER BY wh.last_watched DESC
+      LIMIT ?
+    `, [userId, limit]);
+
+    const stats = await db.get(`
+      SELECT
+        COUNT(*) AS entries,
+        COALESCE(SUM(watch_time), 0) AS totalWatchSeconds,
+        COALESCE(SUM(CASE WHEN completed = 1 THEN 1 ELSE 0 END), 0) AS completedCount,
+        MAX(last_watched) AS lastWatched
+      FROM watch_history
+      WHERE user_id = ?
+    `, [userId]);
+
+    res.json({
+      user: publicUserRow(user),
+      stats: {
+        entries: Number(stats?.entries || 0),
+        totalWatchSeconds: Number(stats?.totalWatchSeconds || 0),
+        completedCount: Number(stats?.completedCount || 0),
+        lastWatched: stats?.lastWatched || null
+      },
+      history: history.map((item) => ({
+        movieId: item.movie_id,
+        watchTime: Number(item.watch_time || 0),
+        completed: item.completed === 1,
+        lastWatched: item.last_watched,
+        title: item.title || `Removed title ${item.movie_id}`,
+        duration: item.duration,
+        posterUrl: item.poster_url,
+        thumbnail: item.thumbnail,
+        mediaType: item.media_type || 'movie',
+        seriesTitle: item.series_title,
+        seasonNumber: item.season_number,
+        episodeNumber: item.episode_number,
+        episodeTitle: item.episode_title,
+        releaseYear: item.release_year,
+        rated: item.rated
+      }))
+    });
+  } catch (error) {
+    console.error('Admin user history fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch viewing history' });
+  }
+});
+
+router.delete('/users/:id/history', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ error: 'Invalid user id' });
+    }
+
+    const result = await db.run('DELETE FROM watch_history WHERE user_id = ?', [userId]);
+    res.json({ cleared: result.changes || 0 });
+  } catch (error) {
+    console.error('Admin user history clear error:', error);
+    res.status(500).json({ error: 'Failed to clear viewing history' });
+  }
+});
+
+router.delete('/users/:id/history/:movieId', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
+    const movieId = Number(req.params.movieId);
+    if (!Number.isInteger(userId) || userId <= 0 || !Number.isInteger(movieId) || movieId <= 0) {
+      return res.status(400).json({ error: 'Invalid user or movie id' });
+    }
+
+    const result = await db.run('DELETE FROM watch_history WHERE user_id = ? AND movie_id = ?', [userId, movieId]);
+    res.json({ removed: result.changes || 0 });
+  } catch (error) {
+    console.error('Admin user history remove error:', error);
+    res.status(500).json({ error: 'Failed to remove viewing history item' });
   }
 });
 
