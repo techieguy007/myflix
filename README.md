@@ -1,49 +1,115 @@
-# 🎬 MyFlix - Your own n**flix Clone for Home Network Streaming
+# MyFlix
 
-A complete n**flix-inspired streaming platform built for your home network. Built with **React.js** and **Node.js**, this full-stack application lets you stream your personal movie collection with a beautiful, responsive interface that rivals commercial streaming services.
+MyFlix is a personal streaming server for a local movie and TV library. It scans a folder such as `D:\movies`, enriches titles with metadata, prepares browser-compatible MP4 files, and serves a React streaming UI over your home network.
 
-![MyFlix Dashboard](https://via.placeholder.com/800x400/e50914/ffffff?text=MyFlix+Dashboard)
+The app is optimized for local-network use on desktop, mobile browsers, and TV browsers. It is not designed to be exposed directly to the public internet.
 
-## Local Library Mode
+For architecture details, see [DESIGN.md](DESIGN.md).
 
-MyFlix can index your existing media library instead of requiring uploads.
+## What It Does
 
-Default media folder:
+- Indexes movies and TV episodes from a local folder.
+- Detects season and episode structure such as `S01E02` and `Season 01`.
+- Ignores clips shorter than the configured duration and skips common extras such as trailers, deleted scenes, samples, and featurettes.
+- Enriches metadata through OMDb with fallback API keys.
+- Shows only media that is ready or verified compatible on the main browse page.
+- Converts incompatible media to mobile-safe MP4.
+- Uses NVIDIA NVENC when available, then falls back gracefully.
+- Supports Hindi-first audio selection, then English, then source default.
+- Extracts compatible embedded subtitles and downloads subtitles from OpenSubtitles.
+- Tracks users, sessions, favorites, continue-watching, and viewing history.
+- Provides an admin dashboard for scanning, conversion queue control, users, sessions, and conversion logs.
+- Runs as a hidden Windows logon task.
 
-```text
-D:\movies
+## Current Playback Strategy
+
+Browsers and TVs are picky. MKV, HEVC/x265, EAC3, AVI, WMV, PGS subtitles, and many large direct files can fail or be unseekable on mobile devices.
+
+MyFlix therefore prepares a broadly compatible MP4 target:
+
+- Container: MP4
+- Video: H.264, max 1080p, bitrate capped
+- Audio: AAC stereo
+- Pixel format: `yuv420p`
+- Fast-start metadata for seekable playback
+- No embedded subtitle, data, or chapter streams in the prepared MP4
+
+Background conversion tries encoders in this order:
+
+1. CUDA decode/scale plus NVENC H.264 encode
+2. NVENC H.264 encode with CPU decode/scale fallback
+3. CPU `libx264` encode as the final fallback
+
+Task Manager can make this confusing. For reliable GPU confirmation, check the NVIDIA `Video Encode` and `Video Decode` graphs or run:
+
+```powershell
+nvidia-smi dmon -c 1 -s u
 ```
 
-Config file:
+## Requirements
+
+- Windows machine for the provided logon service script.
+- Node.js and npm.
+- FFmpeg and FFprobe.
+- A local media folder, default `D:\movies`.
+- Optional OMDb API key or keys for metadata.
+- Optional OpenSubtitles credentials for subtitle search/download.
+- Optional NVIDIA GPU with NVENC support for faster conversions.
+
+The default config points FFmpeg to the Chocolatey install path:
+
+```text
+C:\ProgramData\chocolatey\lib\ffmpeg\tools\ffmpeg\bin\ffmpeg.exe
+C:\ProgramData\chocolatey\lib\ffmpeg\tools\ffmpeg\bin\ffprobe.exe
+```
+
+## Quick Start
+
+Install dependencies:
+
+```powershell
+npm install
+npm run build
+```
+
+Start once in the foreground:
+
+```powershell
+npm start
+```
+
+Open locally:
+
+```text
+http://127.0.0.1:5000/
+```
+
+Default admin account:
+
+```text
+username: admin
+password: admin123
+```
+
+Change the admin password after first login.
+
+## Configuration
+
+Primary config:
 
 ```text
 config/myflix.config.json
 ```
 
-Important settings:
-
-- `media.root`: media folder to scan, default `D:\movies`
-- `media.autoScanOnStart`: rebuilds the index whenever MyFlix starts
-- Startup and normal manual scans are incremental: previously scanned unchanged files are skipped
-- `media.renameMode`: `suggest` by default; use `apply` only when you want MyFlix to move/rename files
-- `media.minDurationMinutes`: ignores movie and TV video files shorter than this, default `15`
-- `metadata.omdbApiKeys`: set one or more OMDb keys; MyFlix will try the next key if the first is invalid or rate-limited
-- `metadata.omdbApiKey`: single-key fallback for older configs
-- `OMDB_API_KEYS`: optional comma-separated environment variable for OMDb keys
-- If OMDb returns quota/auth errors such as `401`, MyFlix temporarily pauses that key until the next day so scans do not spam failed lookups
-- `auth.sessionDays`: maximum login token lifetime, default `180`
-- `auth.idleMinutes`: idle browser-session timeout before server-side revocation, default `120`
-- `auth.sessionCleanupIntervalMinutes`: how often idle/expired sessions are cleaned, default `5`
-- `server.host`: `0.0.0.0` allows access from other devices on your local network
-- `server.port`: default `5000`
-
-To keep API keys out of Git, place secrets in an ignored local file:
+Secrets and machine-specific overrides:
 
 ```text
 config/myflix.local.json
 ```
 
-Example:
+`config/myflix.local.json` is ignored by Git and should be used for API keys, passwords, certificate paths, and local machine overrides.
+
+Example local config:
 
 ```json
 {
@@ -64,9 +130,34 @@ Example:
 }
 ```
 
-## Local HTTPS And Persistent Login
+Important settings:
 
-For a local-network HTTPS URL, generate a private MyFlix certificate authority and server certificate:
+- `media.root`: folder to scan, default `D:\movies`
+- `media.autoScanOnStart`: run an incremental scan when the service starts
+- `media.minDurationMinutes`: ignore video files shorter than this, default `15`
+- `media.renameMode`: `suggest` stores clean names without moving files; `apply` can rename/move files
+- `metadata.omdbApiKeys`: list of OMDb keys; MyFlix falls back to the next key on quota/auth failures
+- `auth.sessionDays`: maximum token lifetime, default `180`
+- `auth.idleMinutes`: idle session timeout, default `120`
+- `server.host`: use `0.0.0.0` for LAN access
+- `server.port`: HTTP port, default `5000`
+- `server.https.port`: HTTPS port, default `5443`
+- `transcoding.ffmpegThreads`: CPU thread count used by FFmpeg
+- `transcoding.deleteOriginalAfterPrepare`: delete the source after a prepared MP4 has been promoted
+
+Environment overrides are also supported. Common ones:
+
+```powershell
+$env:MYFLIX_MEDIA_ROOT = "D:\movies"
+$env:OMDB_API_KEYS = "first-key,second-key"
+$env:MYFLIX_OPENSUBTITLES_API_KEY = "your-key"
+$env:MYFLIX_SUBTITLE_LANGUAGES = "en,hi"
+$env:MYFLIX_SESSION_DAYS = "180"
+```
+
+## Local HTTPS
+
+Generate a private local certificate authority and HTTPS certificate:
 
 ```powershell
 .\scripts\create-local-https-cert.ps1 -HttpsPort 5443 -SessionDays 180
@@ -74,150 +165,40 @@ For a local-network HTTPS URL, generate a private MyFlix certificate authority a
 
 The script:
 
-- creates `config/certs/` files, which are ignored by Git
-- trusts the MyFlix root CA for the current Windows user
-- writes HTTPS settings to `config/myflix.local.json`
-- keeps login tokens valid for `auth.sessionDays`, default `180`
-- redirects `http://YOUR-IP:5000/` to `https://YOUR-IP:5443/`
+- creates certificate files under `config\certs\`
+- trusts the local root CA for the current Windows user
+- writes HTTPS config into `config\myflix.local.json`
+- enables HTTP to HTTPS redirect when configured
 
-Restart MyFlix after generating the certificate:
+Restart:
 
 ```powershell
 .\service\myflix-service.ps1 -Action stop
 .\service\myflix-service.ps1 -Action start
 ```
 
-Then open:
+Open:
 
 ```text
-https://192.168.1.15:5443/
+https://127.0.0.1:5443/
+https://YOUR-LAN-IP:5443/
 ```
 
-Phones, tablets, and TVs do not automatically trust certificates generated on this Windows machine. To remove the warning on those devices, install this root CA as a trusted certificate on each device:
+Phones, tablets, and TVs will not automatically trust a certificate generated on the Windows host. To remove the browser warning, install this root CA on each device:
 
 ```text
 config\certs\myflix-local-root-ca.crt
 ```
 
-If a browser was already open before the certificate was created, fully close and reopen that browser so it reloads the Windows certificate trust store.
+## Windows Logon Service
 
-Browsers store login sessions per origin, so the first visit to the new HTTPS URL requires one login. After that, MyFlix stores the JWT in browser local storage and refreshes it on app startup, so you should not need to log in every time unless you log out, clear site data, switch browser/profile, or the session expires.
-
-MyFlix also tracks server-side browser sessions. Each authenticated request updates `last_seen_at`; sessions idle longer than `auth.idleMinutes` are automatically revoked by the cleanup loop. Admin > Sessions shows the current alive count and lets you clean idle sessions or terminate a session manually.
-
-Manual scan:
-
-```powershell
-npm run scan-library
-```
-
-Force a full rescan of every file:
-
-```powershell
-npm run scan-library -- --force
-```
-
-The scanner detects movies, `S01E02` style TV episodes, and season folders such as:
-
-```text
-Show Name\Season 01\Episode 02.mkv
-```
-
-TV episodes are indexed as seasons and episodes:
-
-```text
-TV Shows/<Show Name>/Season 01/<Show Name> - S01E02 - <Episode Title>.mkv
-```
-
-Movie rename suggestions are indexed as:
-
-```text
-Movies/<Movie Name> (2024)/<Movie Name> (2024).mkv
-```
-
-By default MyFlix only stores these clean target names as suggestions in SQLite. It does not rename or move your files unless `media.renameMode` is changed to `apply`.
-
-During each scan MyFlix uses `ffprobe` to skip short clips when they are below `media.minDurationMinutes`. It also ignores common extras folders and files such as `Featurettes`, `Deleted Scenes`, `Trailers`, samples, audition footage, and bonus features, then collapses scanner-created duplicates by keeping the longer or larger copy in the index.
-
-## Device-Safe Playback Compatibility
-
-Browsers, TVs, and mobile devices do not agree on local-library formats such as MKV, HEVC/x265, EAC3, AVI, WMV, or even some MP4 variants. MyFlix standardizes the library into seekable MP4 files that work broadly across devices:
-
-- Background conversion targets MP4 with bitrate-capped H.264 Constrained Baseline video, AAC stereo audio, `yuv420p`, no B-frames, no embedded data/subtitle/chapter tracks, fast-start metadata, and max-1080p output for remote/mobile reliability.
-- Mobile-safe conversion uses CPU `libx264` encoding for stricter browser compatibility; GPU/NVENC is no longer used for the final mobile-safe library target.
-- The selected audio track prefers Hindi, then English, then the source default.
-- Playback uses a direct MP4 stream with HTTP range support when the converted file exists.
-- Mobile and LAN clients wait for a seekable mobile-safe MP4 instead of relying on live fallback transcoding or very large direct-play files.
-- If original deletion is enabled, the prepared MP4 is promoted into the movie folder and becomes the tracked library file.
-- Files with multiple audio tracks expose an audio selector in the player; choosing another track prepares a matching MP4 variant when available.
-- Embedded text subtitles are exposed in the subtitle selector and converted to cached WebVTT when selected.
-- The subtitle selector can search OpenSubtitles by movie hash, filename/title, IMDb ID, and season/episode metadata, then download the selected subtitle as a WebVTT sidecar next to the video.
-- Prepared MP4, subtitle, and legacy fallback output are cached locally under `transcodes/` and ignored by Git.
-
-Install `ffmpeg` and `ffprobe` on the server machine for conversion to work. On Windows, MyFlix prefers the real Chocolatey package binaries under `C:\ProgramData\chocolatey\lib\ffmpeg\tools\ffmpeg\bin` so Task Manager does not show CPU-heavy Chocolatey shim wrappers.
-
-The Windows service passes these transcoding settings from `config/myflix.config.json`:
-
-```json
-"transcoding": {
-  "ffmpegPath": "C:\\ProgramData\\chocolatey\\lib\\ffmpeg\\tools\\ffmpeg\\bin\\ffmpeg.exe",
-  "ffprobePath": "C:\\ProgramData\\chocolatey\\lib\\ffmpeg\\tools\\ffmpeg\\bin\\ffprobe.exe",
-  "ffmpegThreads": 2,
-  "ffmpegPreset": "ultrafast",
-  "realtime": true,
-  "prepareOnStartup": false,
-  "preparedMaxStartupJobs": 0,
-  "deleteOriginalAfterPrepare": true,
-  "deleteOriginalWithMultipleAudio": true,
-  "deleteOriginalWithEmbeddedSubtitles": true
-}
-```
-
-Use `ffmpegThreads: 1` for the lowest CPU usage. Prepared MP4 jobs run one at a time. Click `Convert All to Mobile-Safe MP4` in Admin > Conversions to queue the whole library. Set `prepareOnStartup: true` when you want the service to continue queuing mobile-safe MP4 conversion after startup scans; `preparedMaxStartupJobs: 0` means no cap, so use a small number if you do not want login-time CPU spikes.
-
-When `deleteOriginalAfterPrepare` is enabled, a successfully prepared MP4 is copied next to the original file, the database is updated to point at that MP4, and then the old source file is deleted with retries. With the default config in this repo, originals with multiple audio tracks or embedded subtitles are also deleted after successful conversion; subtitle sidecars are extracted when possible before deletion.
-
-## OpenSubtitles Downloads
-
-The player subtitle menu includes a `Download Subtitles` section. Enter comma-separated language codes such as:
-
-```text
-en,hi
-```
-
-Then click search and choose a result. MyFlix saves the downloaded subtitle beside the video as:
-
-```text
-Movie Name.en.opensubtitles-123456.vtt
-```
-
-OpenSubtitles requires a valid `Api-Key` header and a valid app-style `User-Agent`; username/password login is used when configured so downloads can use your account quota. You can also set these values with environment variables:
-
-```powershell
-$env:MYFLIX_OPENSUBTITLES_API_KEY = "your-key"
-$env:MYFLIX_OPENSUBTITLES_USERNAME = "your-username"
-$env:MYFLIX_OPENSUBTITLES_PASSWORD = "your-password"
-$env:MYFLIX_SUBTITLE_LANGUAGES = "en,hi"
-```
-
-## Run At Windows Logon
-
-Install dependencies before registering the startup task:
-
-```powershell
-npm install
-npm run build
-```
-
-The service script auto-detects Node.js from PATH, `%APPDATA%\npm\node.cmd`, or standard Node install locations. If Node is installed somewhere else, set `service.nodeExe` in `config/myflix.config.json` to the full path.
-
-Install MyFlix as a current-user Windows logon task:
+Install as a hidden current-user logon task:
 
 ```powershell
 .\service\myflix-service.ps1 -Action install
 ```
 
-Start it now:
+Start now:
 
 ```powershell
 .\service\myflix-service.ps1 -Action start
@@ -229,30 +210,153 @@ Check status:
 .\service\myflix-service.ps1 -Action status
 ```
 
-Stop or remove it:
+Stop:
 
 ```powershell
 .\service\myflix-service.ps1 -Action stop
+```
+
+Uninstall:
+
+```powershell
 .\service\myflix-service.ps1 -Action uninstall
 ```
 
-The task runs hidden in the background, rebuilds the media index on startup, and writes logs to:
+The service wrapper runs without a visible command prompt and writes logs under `logs/`.
 
-```text
-logs/
+## Scanning The Library
+
+Manual incremental scan:
+
+```powershell
+npm run scan-library
 ```
 
-Useful log files while stabilizing the app:
+Force a full rescan:
 
-```text
-logs/myflix-app.jsonl       Structured application events, one JSON object per line
-logs/myflix-node.out.log    Node stdout from the background service process
-logs/myflix-node.err.log    Node stderr from the background service process
-logs/myflix-service.out.log Windows task wrapper output
-logs/myflix-service.err.log Windows task wrapper errors
+```powershell
+npm run scan-library -- --force
 ```
 
-Quick troubleshooting commands:
+The scanner:
+
+- walks `media.root`
+- skips unchanged files during normal scans
+- uses `ffprobe` to read duration, codecs, audio streams, subtitle streams, and resolution
+- ignores files shorter than `media.minDurationMinutes`
+- detects movies and TV episodes
+- stores clean rename suggestions
+- enriches metadata from OMDb when enabled
+- marks old missing files so stale titles do not keep showing
+
+Main browse pages intentionally hide indexed items until conversion finishes or compatibility is verified.
+
+## Conversion Queue
+
+Open Admin > Conversions.
+
+Useful controls:
+
+- `Convert All to Mobile-Safe MP4`: queues all non-ready files.
+- `Pause Queue`: stops after the current running file.
+- `Resume Queue`: restarts queued work.
+- Encoder mode: `AUTO`, `GPU`, or `CPU`.
+- Clear conversion log: hides old conversion records from the admin view without deleting playback data.
+
+Prepared MP4 files are first created under:
+
+```text
+transcodes/
+```
+
+After successful preparation, the MP4 can be promoted next to the source file. When configured, the original source file is deleted only after the replacement has been written and the database points to the replacement.
+
+## Subtitles
+
+The player supports:
+
+- Existing `.srt` and `.vtt` sidecar files
+- Extractable embedded text subtitles
+- OpenSubtitles search and download
+
+OpenSubtitles lookup uses:
+
+- movie hash based on the first and last 64 KB of the video
+- filename/title search
+- IMDb ID when available
+- season and episode numbers for TV episodes
+
+Downloaded subtitles are saved as WebVTT sidecars next to the video:
+
+```text
+Movie Name.en.opensubtitles-123456.vtt
+```
+
+Network calls to OpenSubtitles retry transient errors such as connection resets, timeouts, and 5xx responses.
+
+## Users And Sessions
+
+Users log in with JWT tokens stored by the browser. The backend also stores server-side session records.
+
+Admin > Users supports:
+
+- create users
+- edit profiles
+- reset passwords
+- change admin status
+- inspect and clear viewing history
+
+Admin > Sessions supports:
+
+- viewing active sessions
+- seeing idle/expired sessions
+- cleaning idle sessions
+- terminating a session manually
+
+## Project Structure
+
+```text
+client/                 React app
+client/src/pages/       Browse, watch, admin, search, login pages
+config/                 Base config and local ignored overrides
+database/               SQLite database initialization and myflix.db
+lib/                    Scanner, metadata, transcoder, subtitles, logging
+logs/                   Runtime logs
+middleware/             Auth middleware
+routes/                 Express API routes
+scripts/                Helper scripts, including local HTTPS certificate generation
+service/                Windows logon task wrapper
+transcodes/             Prepared MP4, HLS, subtitle cache
+uploads/                Uploaded media/posters when using upload flows
+server.js               Express entry point
+```
+
+## API Surface
+
+Main route groups:
+
+- `/api/auth`: login, refresh, users, sessions
+- `/api/library`: library browse data, scan status, conversion queue, conversion logs
+- `/api/movies`: movie CRUD, favorites, continue-watching, progress
+- `/api/stream`: playback profile, direct/prepared/HLS media, subtitle serving
+- `/api/subtitles`: OpenSubtitles search and download
+- `/api/upload`: upload and folder scan flows
+
+Streaming endpoints support HTTP range requests so prepared MP4 playback can seek normally.
+
+## Logs
+
+Useful files:
+
+```text
+logs/myflix-app.jsonl
+logs/myflix-node.out.log
+logs/myflix-node.err.log
+logs/myflix-service.out.log
+logs/myflix-service.err.log
+```
+
+Quick checks:
 
 ```powershell
 Get-Content .\logs\myflix-app.jsonl -Tail 80
@@ -260,503 +364,65 @@ Get-Content .\logs\myflix-node.err.log -Tail 80
 .\service\myflix-service.ps1 -Action status
 ```
 
-The application log records startup/shutdown, scan progress, metadata lookup failures, auth/admin denials, library API responses, playback profile decisions, HLS transcoding, subtitle extraction, direct streaming, and unhandled process errors. Request logs include `requestId`, status, duration, URL with sensitive query values redacted, user agent, and range headers.
+The structured log includes request IDs, scan progress, metadata failures, conversion lifecycle events, FFmpeg warnings, playback decisions, stream requests, subtitle downloads, and session cleanup events.
 
-To increase verbosity temporarily, set `service.logLevel` in `config/myflix.config.json`:
+## Troubleshooting
 
-```json
-{
-  "service": {
-    "logLevel": "debug"
-  }
-}
+Admin page still shows old UI:
+
+```powershell
+Ctrl + F5
 ```
 
-Then restart the service.
+The server sends `index.html` with `Cache-Control: no-store`, but a hard refresh clears any old browser state.
 
-With the default config, open MyFlix locally at:
+LAN device cannot open MyFlix:
 
-```text
-http://127.0.0.1:5000/
+- Confirm the server is listening on `0.0.0.0`.
+- Use the host LAN IP, not `127.0.0.1`, from other devices.
+- Allow Node.js through Windows Firewall.
+- If HTTPS is enabled, install the local root CA on the device or accept the local certificate warning.
+
+Video does not play on mobile:
+
+- Confirm the title is converted or skipped as already device-safe.
+- Check Admin > Conversions.
+- Confirm the watch page says it is using a prepared MP4/direct stream, not an original unsupported file.
+
+Conversion seems CPU-heavy:
+
+- Some work always remains on CPU: demuxing, audio, filters, and CPU decode fallback.
+- For GPU activity, check NVIDIA `Video Encode`, not only the Task Manager process GPU column.
+- Run `nvidia-smi dmon -c 1 -s u`.
+
+Files cannot be renamed:
+
+- Stop MyFlix with `.\service\myflix-service.ps1 -Action stop`.
+- Confirm no `ffmpeg.exe` process is still running.
+- The app attempts to stop child transcode jobs on shutdown.
+
+## Updating
+
+Pull latest changes:
+
+```powershell
+git pull
+npm install
+npm run build
+.\service\myflix-service.ps1 -Action stop
+.\service\myflix-service.ps1 -Action start
 ```
 
-If local HTTPS is enabled, use:
+Back up the database:
 
-```text
-https://127.0.0.1:5443/
-https://192.168.1.15:5443/
+```powershell
+Copy-Item .\database\myflix.db .\database\myflix.backup.db
 ```
 
-For another device on the same network, use the host machine's LAN IP with port `5000` for HTTP or port `5443` for HTTPS.
+## Design Notes
 
-## ✨ Features
+See [DESIGN.md](DESIGN.md) for the detailed architecture, data model, conversion pipeline, failure handling, and operations model.
 
-### 🎥 Core Streaming Features
-- **High-Quality Video Streaming** - Optimized video delivery with range request support
-- **Responsive Video Player** - Custom player with play/pause, seek, volume control
-- **Progress Tracking** - Resume watching from where you left off
-- **Multiple Format Support** - MP4, AVI, MKV, MOV, and more
-- **Subtitle Support** - SRT, VTT subtitle files automatically detected
+## License
 
-### 🏠 Home Network Optimized
-- **Local Server Deployment** - Run entirely on your home network
-- **Fast File Access** - Direct file system access for instant loading
-- **No Internet Required** - Works completely offline once set up
-- **Network Device Support** - Access from phones, tablets, smart TVs, computers
-
-### 🎨 n**flix-Style Interface
-- **Modern UI Design** - Clean, dark theme matching n**flix aesthetics
-- **Responsive Design** - Perfect on desktop, tablet, and mobile devices
-- **Smooth Animations** - Fluid page transitions and hover effects
-- **Grid & Row Layouts** - n**flix-style movie browsing experience
-
-### 👤 User Management
-- **Multi-User Support** - Individual accounts with separate watch histories
-- **Admin Panel** - Upload and manage movies, create users, edit profiles, reset passwords, and manage viewing history
-- **Watch Progress** - Individual progress tracking per user
-- **Favorites** - Personal movie favorites list
-- **Continue Watching** - Quick access to partially watched content
-
-### 🔍 Content Discovery
-- **Advanced Search** - Search by title, director, cast, genre
-- **Genre Filtering** - Browse movies by category
-- **Recently Added** - See newest additions to the library
-- **Ratings System** - Rate and view movie ratings
-
-### 🔒 Security Features
-- **JWT Authentication** - Secure user sessions
-- **Admin-Only Uploads** - Controlled content management
-- **Rate Limiting** - Protection against abuse
-- **Input Validation** - Security against malicious inputs
-
-### 📱 Progressive Web App (PWA) Features
-- **Installable App** - Install MyFlix as a standalone app on your device
-- **Standalone Mode** - Runs in its own window without browser UI
-- **App-Like Experience** - Native app feel with quick access from taskbar/dock
-- **Cross-Device Sync** - Install on multiple devices for seamless access
-- **Offline Capability** - Enhanced offline experience (when configured)
-
-## 💻 Tech Stack
-
-MyFlix is built using modern web technologies with a React.js frontend and Node.js backend architecture.
-
-### Frontend (React.js)
-
-**Core Framework:**
-- **React 18.2.0** - Modern React with hooks and concurrent features
-- **React DOM** - React rendering engine
-- **Create React App** - Development tooling and build configuration
-
-**Routing & Navigation:**
-- **React Router DOM v6.15.0** - Client-side routing and navigation
-
-**State Management & Data Fetching:**
-- **React Query v3.39.3** - Powerful data synchronization for React (server state management, caching, background updates)
-
-**UI & Styling:**
-- **Styled Components v6.0.8** - CSS-in-JS styling solution
-- **Framer Motion v10.16.4** - Production-ready motion library for React animations
-- **React Icons v4.11.0** - Popular icons for React
-
-**Forms & Validation:**
-- **React Hook Form v7.46.0** - Performant, flexible forms with easy validation
-
-**Video & Media:**
-- **React Player v2.13.0** - React component for playing media from various sources
-
-**Notifications:**
-- **React Hot Toast v2.4.1** - Beautiful toast notifications for React
-
-**Performance & UX:**
-- **React Intersection Observer v9.5.2** - Hooks for detecting element visibility
-- **React LazyLoad v3.2.0** - Lazy loading component for React
-- **Swiper v10.3.0** - Modern touch slider with React support
-
-**Utilities:**
-- **Axios v1.5.0** - Promise-based HTTP client for API requests
-- **Lodash Debounce v4.0.8** - Debounce function for performance optimization
-- **Date-fns v2.30.0** - Modern JavaScript date utility library
-
-### Backend (Node.js)
-
-**Core Framework:**
-- **Node.js** - JavaScript runtime environment
-- **Express.js v4.18.2** - Fast, unopinionated web framework
-
-**Database:**
-- **SQLite3 v5.1.6** - Lightweight, serverless database engine
-
-**Authentication & Security:**
-- **JWT (JSON Web Tokens) v9.0.2** - Secure token-based authentication
-- **BcryptJS v2.4.3** - Password hashing library
-- **Helmet v7.0.0** - Security middleware for Express
-- **Express Rate Limit v6.10.0** - Basic rate-limiting middleware
-
-**File Handling:**
-- **Multer v1.4.5** - Middleware for handling multipart/form-data (file uploads)
-- **FFmpeg** - Video processing and thumbnail generation
-- **Fluent FFmpeg v2.1.2** - Node.js wrapper for FFmpeg
-
-**Utilities:**
-- **CORS v2.8.5** - Cross-Origin Resource Sharing middleware
-- **Compression v1.7.4** - Compression middleware for Express
-- **Axios v1.10.0** - HTTP client for API calls
-
-### Development Tools
-
-- **Nodemon v3.0.1** - Development utility that monitors for file changes
-- **Concurrently v8.2.1** - Run multiple commands concurrently
-
-### Architecture
-
-- **Full-Stack JavaScript** - Single language (JavaScript) for both frontend and backend
-- **RESTful API** - Backend exposes REST API endpoints
-- **JWT-based Authentication** - Token authentication with server-side session tracking and idle revocation
-- **SQLite Database** - File-based database, perfect for home server setup
-- **React SPA** - Single Page Application with client-side routing
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- **Node.js** (v16 or later)
-- **npm** or **yarn**
-- **FFmpeg** (for video processing and thumbnails)
-
-### Installation
-
-1. **Clone the repository:**
-   ```bash
-   git clone <your-repo-url>
-   cd myflix
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   # Install backend dependencies
-   npm install
-
-   # Install frontend dependencies
-   cd client
-   npm install
-   cd ..
-   ```
-
-3. **Install FFmpeg:**
-
-   **Windows:**
-   ```bash
-   # Using Chocolatey
-   choco install ffmpeg
-
-   # Or download from https://ffmpeg.org/download.html
-   ```
-
-   **macOS:**
-   ```bash
-   # Using Homebrew
-   brew install ffmpeg
-   ```
-
-   **Linux (Ubuntu/Debian):**
-   ```bash
-   sudo apt update
-   sudo apt install ffmpeg
-   ```
-
-4. **Start the application:**
-   ```bash
-   # Development mode (both backend and frontend)
-   npm run dev
-
-   # Or start individually
-   npm run dev:server  # Backend only
-   npm run dev:client  # Frontend only
-   ```
-
-5. **Access MyFlix:**
-   - Open your browser and go to `http://localhost:3000`
-   - The backend API runs on `http://localhost:5000`
-
-### Default Admin Account
-
-```
-Username: admin
-Email: admin@myflix.com
-Password: admin123
-```
-
-**⚠️ Important: Change the default admin password immediately after setup!**
-
-## 📁 Project Structure
-
-```
-myflix/
-├── client/                     # React frontend
-│   ├── public/
-│   ├── src/
-│   │   ├── components/         # Reusable UI components
-│   │   ├── contexts/           # React contexts (Auth, etc.)
-│   │   ├── pages/              # Page components
-│   │   ├── utils/              # Utility functions
-│   │   └── App.js              # Main app component
-│   └── package.json
-├── database/                   # Database setup and management
-│   └── init.js                 # Database initialization
-├── middleware/                 # Express middleware
-│   └── auth.js                 # Authentication middleware
-├── routes/                     # API route handlers
-│   ├── auth.js                 # Authentication routes
-│   ├── movies.js               # Movie management routes
-│   ├── stream.js               # Video streaming routes
-│   └── upload.js               # File upload routes
-├── movies/                     # Video files storage
-├── thumbnails/                 # Generated thumbnails
-├── uploads/                    # Uploaded files
-├── server.js                   # Express server
-├── package.json                # Backend dependencies
-└── README.md                   # This file
-```
-
-## 🎬 Adding Movies to Your Library
-
-### Method 1: Admin Web Interface
-
-1. Log in with admin credentials
-2. Navigate to `/admin` or click "Admin" in the navigation
-3. Use the upload form to add movies with metadata
-4. Thumbnails are auto-generated from video files
-
-### Method 2: Direct File Copy
-
-1. Copy video files to the `movies/` directory
-2. Use the admin panel to scan for new files
-3. Add metadata through the web interface
-
-### Supported Video Formats
-
-- MP4 (Recommended)
-- AVI
-- MKV
-- MOV
-- WMV
-- FLV
-- WebM
-- M4V
-
-### Thumbnail Generation
-
-Thumbnails are automatically generated at 10% of video duration. For best results:
-- Ensure FFmpeg is properly installed
-- Videos should have clear scenes early in the content
-- Custom thumbnails can be uploaded via admin panel
-
-## 🔧 Configuration
-
-### Environment Variables
-
-Create a `.env` file in the root directory:
-
-```env
-# Server Configuration
-PORT=5000
-NODE_ENV=development
-
-# Security
-JWT_SECRET=your-super-secret-jwt-key-change-this
-
-# File Upload Limits
-MAX_FILE_SIZE=10737418240  # 10GB in bytes
-```
-
-### Network Access
-
-To access MyFlix from other devices on your network:
-
-1. Find your computer's IP address:
-   ```bash
-   # Windows
-   ipconfig
-
-   # macOS/Linux
-   ifconfig
-   ```
-
-2. Update the server to bind to all interfaces:
-   - In `server.js`, change the listen call:
-   ```javascript
-   app.listen(PORT, '0.0.0.0', () => {
-     // ...
-   });
-   ```
-
-3. Access from other devices using: `http://YOUR-IP-ADDRESS:5000`
-
-## 📱 Device Compatibility
-
-### Tested Browsers
-- Chrome 90+
-- Firefox 88+
-- Safari 14+
-- Edge 90+
-
-### Mobile Support
-- iOS Safari
-- Android Chrome
-- Responsive design adapts to all screen sizes
-
-### Smart TV Support
-- Modern smart TV browsers
-- Casting support (via browser casting)
-- Full-screen video playback
-
-## 📲 Progressive Web App (PWA) Installation
-
-MyFlix is configured as a **Progressive Web App (PWA)**, which means modern browsers (Chrome, Edge, Firefox, Safari) will automatically detect it and offer to install it as a standalone application.
-
-### Why You See the Install Prompt
-
-When you visit MyFlix in your browser (especially Edge, Chrome, or other Chromium-based browsers), you may see an **"Install MyFlix"** prompt. This happens because:
-
-1. **PWA Manifest** - The app includes a `manifest.json` file that declares it as installable
-2. **Standalone Display Mode** - Configured to run as a standalone app (not just a website)
-3. **Browser Detection** - Modern browsers automatically detect PWA-capable sites and offer installation
-
-### Benefits of Installing as PWA
-
-Installing MyFlix as a PWA provides several advantages:
-
-- ✅ **Dedicated Window** - Opens in its own focused window without browser UI
-- ✅ **Quick Access** - Pin to taskbar (Windows) or dock (macOS) for instant access
-- ✅ **App-Like Experience** - Feels like a native application
-- ✅ **Better Performance** - Optimized loading and caching
-- ✅ **Cross-Device** - Install on multiple devices (phone, tablet, desktop)
-
-### How to Install
-
-**On Desktop (Windows/macOS/Linux):**
-- Click the **"Install"** button when the prompt appears
-- Or look for the install icon (➕) in your browser's address bar
-- Or go to browser menu → "Install MyFlix" / "Install app"
-
-**On Mobile (iOS/Android):**
-- **iOS Safari**: Tap Share → "Add to Home Screen"
-- **Android Chrome**: Tap the menu → "Install app" or "Add to Home Screen"
-
-### If You Don't Want to Install
-
-You can simply click **"Not now"** or dismiss the prompt. MyFlix will continue to work normally in your browser. The prompt may reappear on future visits, but you can always dismiss it.
-
-**Note:** The PWA features are optional. You can use MyFlix entirely in your browser without installing it.
-
-## 🛡️ Security Considerations
-
-### For Home Network Use
-- Change default admin password
-- Keep the server updated
-- Use strong JWT secret
-- Consider VPN for remote access
-
-### For Internet Exposure (Not Recommended)
-- Use HTTPS/SSL certificates
-- Implement additional authentication
-- Regular security updates
-- Consider professional security review
-
-## 🚨 Troubleshooting
-
-### Common Issues
-
-**Videos won't play:**
-- Check video format compatibility
-- Ensure FFmpeg is installed correctly
-- Verify file permissions in `movies/` directory
-
-**Thumbnails not generating:**
-- Confirm FFmpeg installation: `ffmpeg -version`
-- Check server logs for FFmpeg errors
-- Ensure write permissions in `thumbnails/` directory
-
-**Can't access from other devices:**
-- Check firewall settings
-- Ensure server is binding to `0.0.0.0`
-- Verify network connectivity
-
-**Upload fails:**
-- Check available disk space
-- Verify file size limits
-- Ensure proper file permissions
-
-### Performance Tips
-
-**For Large Libraries:**
-- Use SSD storage for better performance
-- Consider video transcoding for lower bandwidth
-- Implement caching strategies
-
-**For Multiple Users:**
-- Monitor server resources
-- Consider load balancing for heavy usage
-- Optimize database queries
-
-## 🔄 Updates and Maintenance
-
-### Keeping MyFlix Updated
-1. Backup your database and movie files
-2. Pull latest changes from repository
-3. Run `npm install` to update dependencies
-4. Restart the server
-
-### Database Backup
-```bash
-# Backup SQLite database
-cp database/myflix.db database/myflix.db.backup
-```
-
-### Log Management
-Check server logs for issues:
-```bash
-# View server logs
-npm run dev:server
-
-# Or check specific log files if configured
-```
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to:
-- Report bugs
-- Suggest features
-- Submit pull requests
-- Improve documentation
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- Inspired by n**flix's user interface and experience
-- Built with **React.js 18.2** frontend and **Node.js/Express.js** backend
-- **FFmpeg** for video processing and thumbnail generation
-- **SQLite** for lightweight, serverless database management
-- **React Router**, **React Query**, and other modern React ecosystem libraries
-- All the open-source contributors and libraries that made this project possible
-
----
-
-## 🎯 Next Steps
-
-After setting up MyFlix:
-
-1. **Change default admin password**
-2. **Upload your first movie**
-3. **Create user accounts for family members**
-4. **Configure network access for other devices**
-5. **Explore the admin panel features**
-
-Enjoy your personal n**flix clone! 🍿
-
----
-
-*Made with ❤️ for home entertainment* 
+MIT. See [LICENSE](LICENSE).
