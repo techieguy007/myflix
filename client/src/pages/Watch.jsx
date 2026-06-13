@@ -1362,7 +1362,10 @@ const Watch = () => {
   const selectedEpisodeValue = selectedSeasonHasCurrentEpisode ? String(movie.id) : '';
   const displayDuration = getKnownDuration();
   const progress = displayDuration ? (currentTime / displayDuration) * 100 : 0;
-  const videoElementSrc = streamMode === 'hls' && Hls.isSupported() ? undefined : videoSrc;
+  const usesHlsJs = streamMode === 'hls' && Hls.isSupported();
+  const isPreparingPlayback = playbackInfo?.streamMode === 'preparing';
+  const videoElementSrc = usesHlsJs ? undefined : videoSrc;
+  const shouldRenderVideo = !isPreparingPlayback && (usesHlsJs || Boolean(videoElementSrc));
 
   return (
     <Container onMouseMove={handleMouseMove}>
@@ -1371,7 +1374,7 @@ const Watch = () => {
           <FiArrowLeft />
         </BackButton>
         
-                 {videoError && (
+                 {videoError && !isPreparingPlayback && (
            <div style={{
              position: 'absolute',
              top: '50%',
@@ -1422,7 +1425,7 @@ const Watch = () => {
            </div>
          )}
 
-        {playbackInfo?.streamMode === 'preparing' && !videoError && (
+        {isPreparingPlayback && (
           <div style={{
             position: 'absolute',
             top: '50%',
@@ -1457,6 +1460,7 @@ const Watch = () => {
           </div>
         )}
         
+        {shouldRenderVideo && (
         <Video
           ref={setVideoRef}
           src={videoElementSrc}
@@ -1473,6 +1477,15 @@ const Watch = () => {
           onPause={() => setIsPlaying(false)}
           onEnded={() => setIsPlaying(false)}
           onError={(e) => {
+            if (isPreparingPlayback || (!videoElementSrc && !usesHlsJs)) {
+              console.info('Ignoring video error while playback source is not ready', {
+                streamMode,
+                hasVideoSrc: Boolean(videoElementSrc),
+                usesHlsJs
+              });
+              setVideoError(null);
+              return;
+            }
             console.error('Video error:', e);
             const browserErrorDetails = {
               error: e.target.error,
@@ -1588,7 +1601,9 @@ const Watch = () => {
             </>
           )}
         </Video>
+        )}
 
+        {shouldRenderVideo && (
         <Controls visible={showControls}>
           <ProgressBar onClick={handleProgressClick}>
             <Progress progress={progress} />
@@ -1708,6 +1723,7 @@ const Watch = () => {
             </TimeDisplay>
           </ControlButtons>
         </Controls>
+        )}
       </VideoContainer>
 
       <MovieInfo>
