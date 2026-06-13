@@ -434,15 +434,30 @@ const formatBytes = (value) => {
   return `${(bytes / (1024 ** index)).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
 };
 
+const sqliteUtcDatePattern = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
+
+const parseAppDate = (value) => {
+  if (!value) return null;
+  const text = String(value).trim();
+  const normalized = sqliteUtcDatePattern.test(text) ? `${text.replace(' ', 'T')}Z` : text;
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
 const formatDateTime = (value) => {
   if (!value) return '-';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  const date = parseAppDate(value);
+  return date ? date.toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZoneName: 'short'
+  }) : value;
 };
 
 const formatSessionAge = (value) => {
   if (!value) return '-';
-  const date = new Date(value);
+  const date = parseAppDate(value);
+  if (!date) return value;
   const diffMs = Date.now() - date.getTime();
   if (!Number.isFinite(diffMs) || diffMs < 0) return formatDateTime(value);
   const minutes = Math.floor(diffMs / 60000);
