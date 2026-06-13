@@ -1,5 +1,4 @@
 const express = require('express');
-const path = require('path');
 const fs = require('fs');
 const db = require('../database/init');
 const { optionalAuth, authenticateToken, requireAdmin } = require('../middleware/auth');
@@ -7,6 +6,7 @@ const { loadConfig } = require('../lib/config');
 const { getScanState, runLibraryScan } = require('../lib/libraryScanner');
 const logger = require('../lib/logger');
 const {
+  PREPARED_CACHE_VERSION,
   getBackgroundConversionQueueState,
   queueBackgroundConversionsForLibrary,
   queueBackgroundConversionsForMovieIds,
@@ -15,9 +15,6 @@ const {
 } = require('../lib/transcoder');
 
 const router = express.Router();
-
-const BROWSER_FILE_EXTENSIONS = new Set(['.mp4', '.m4v', '.webm', '.ogg', '.ogv']);
-const BROWSER_FORMATS = new Set(['mp4', 'm4v', 'webm', 'ogg', 'ogv']);
 
 async function queuePreparedMediaAfterScan(trigger) {
   const config = loadConfig();
@@ -87,27 +84,21 @@ function groupEpisodes(episodes) {
     .sort((a, b) => a.title.localeCompare(b.title));
 }
 
-function isLikelyBrowserContainer(row) {
-  const ext = path.extname(String(row._video_path || '')).toLowerCase();
-  const format = String(row._format || '').toLowerCase();
-  return BROWSER_FILE_EXTENSIONS.has(ext) || BROWSER_FORMATS.has(format);
-}
-
 function isAvailableForBrowse(row) {
   const latestJobStatus = String(row._conversion_job_status || '').toLowerCase();
   const latestJobReason = String(row._conversion_job_reason || '').toLowerCase();
   const hasAvailableConversion = Number(row._has_available_conversion || 0) > 0;
   const videoPath = String(row._video_path || '');
+  const conversionOutputPath = String(row._conversion_job_output_path || '');
 
   if (!videoPath || !fs.existsSync(videoPath)) return false;
 
   if (hasAvailableConversion) return true;
-  if (latestJobStatus === 'completed') return true;
-  if (latestJobStatus === 'skipped' && latestJobReason.includes('already browser compatible')) return true;
+  if (latestJobStatus === 'completed' && conversionOutputPath && fs.existsSync(conversionOutputPath)) return true;
   if (latestJobStatus === 'skipped' && latestJobReason.includes('already device-safe')) return true;
   if (['queued', 'running', 'failed'].includes(latestJobStatus)) return false;
 
-  return isLikelyBrowserContainer(row);
+  return false;
 }
 
 function publicLibraryRow(row) {
@@ -138,9 +129,29 @@ router.get('/', optionalAuth, async (req, res) => {
       conversion_flags AS (
         SELECT
           movie_id,
-          MAX(CASE WHEN status IN ('promoted', 'deleted', 'prepared-kept') THEN 1 ELSE 0 END) AS has_available_conversion
+          CASE
+            WHEN status IN ('promoted', 'deleted') THEN COALESCE(replacement_path, '')
+            WHEN status = 'prepared-kept' THEN COALESCE(source_path, '')
+            ELSE ''
+          END AS current_path,
+          MAX(CASE
+            WHEN status IN ('promoted', 'deleted')
+              AND COALESCE(replacement_path, '') <> ''
+              AND COALESCE(prepared_path, '') LIKE '%${PREPARED_CACHE_VERSION}%'
+              THEN 1
+            WHEN status = 'prepared-kept'
+              AND COALESCE(prepared_path, '') <> ''
+              AND COALESCE(prepared_path, '') LIKE '%${PREPARED_CACHE_VERSION}%'
+              THEN 1
+            ELSE 0
+          END) AS has_available_conversion
         FROM media_conversions
-        GROUP BY movie_id
+        GROUP BY movie_id,
+          CASE
+            WHEN status IN ('promoted', 'deleted') THEN COALESCE(replacement_path, '')
+            WHEN status = 'prepared-kept' THEN COALESCE(source_path, '')
+            ELSE ''
+          END
       )
       SELECT m.id, m.title, m.description, m.genre, m.release_year, m.duration, m.rating, m.director, m."cast",
              m.thumbnail, m.created_at, m.poster_url, m.imdb_id, m.imdb_rating, m.plot, m.runtime, m.rated,
@@ -155,7 +166,9 @@ router.get('/', optionalAuth, async (req, res) => {
       LEFT JOIN latest_conversion_jobs
         ON latest_conversion_jobs.movie_id = m.id
        AND COALESCE(latest_conversion_jobs.source_path, '') = COALESCE(m.video_path, '')
-      LEFT JOIN conversion_flags ON conversion_flags.movie_id = m.id
+      LEFT JOIN conversion_flags
+        ON conversion_flags.movie_id = m.id
+       AND COALESCE(conversion_flags.current_path, '') = COALESCE(m.video_path, '')
       ORDER BY COALESCE(m.series_title, m.title), m.season_number, m.episode_number, m.title
     `);
 
