@@ -12,7 +12,13 @@ function shouldPreferCompatiblePlayback() {
     return false;
   }
 
-  return /Android|iPhone|iPad|iPod|Mobile|EdgA|CriOS|FxiOS/i.test(navigator.userAgent || '');
+  const userAgent = navigator.userAgent || '';
+  const hostname = window.location && window.location.hostname;
+  const isLocalHost = hostname === 'localhost'
+    || hostname === '127.0.0.1'
+    || hostname === '::1';
+
+  return !isLocalHost || /Android|iPhone|iPad|iPod|Mobile|EdgA|CriOS|FxiOS/i.test(userAgent);
 }
 
 const Container = styled.div`
@@ -899,6 +905,40 @@ const Watch = () => {
     }
   };
 
+  const reportVideoPlaybackError = useCallback((videoElement, eventName = 'video-error') => {
+    if (!movie || !videoElement) {
+      return;
+    }
+
+    api.post(`/api/stream/${movie.id}/playback-error`, {
+      eventName,
+      streamMode,
+      playbackInfo: playbackInfo ? {
+        streamMode: playbackInfo.streamMode,
+        directUrl: playbackInfo.directUrl,
+        hlsUrl: playbackInfo.hlsUrl,
+        forceCompatible: playbackInfo.compatibility?.forceCompatible,
+        videoCodec: playbackInfo.compatibility?.videoCodec,
+        audioCodec: playbackInfo.compatibility?.audioCodec,
+        preparedReady: playbackInfo.compatibility?.preparedReady,
+        preparedQueued: playbackInfo.compatibility?.preparedQueued,
+        preparedRunning: playbackInfo.compatibility?.preparedRunning
+      } : null,
+      mediaError: videoElement.error ? {
+        code: videoElement.error.code,
+        message: videoElement.error.message || ''
+      } : null,
+      networkState: videoElement.networkState,
+      readyState: videoElement.readyState,
+      currentTime: videoElement.currentTime,
+      duration: Number.isFinite(videoElement.duration) ? videoElement.duration : null,
+      src: videoElement.currentSrc || videoElement.src || '',
+      userAgent: navigator.userAgent || ''
+    }).catch((error) => {
+      console.warn('Failed to report video playback error:', error);
+    });
+  }, [movie, playbackInfo, streamMode]);
+
   useEffect(() => {
     applySubtitleSelection();
   }, [videoRef, activeSubtitle, subtitleTracks, videoSrc]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1434,13 +1474,14 @@ const Watch = () => {
           onEnded={() => setIsPlaying(false)}
           onError={(e) => {
             console.error('Video error:', e);
-            const errorDetails = {
+            const browserErrorDetails = {
               error: e.target.error,
               networkState: e.target.networkState,
               readyState: e.target.readyState,
               src: e.target.src
             };
-            console.error('Video error details:', errorDetails);
+            console.error('Video error details:', browserErrorDetails);
+            reportVideoPlaybackError(e.target);
             
             if (e.target.error) {
               if (streamMode === 'hls' && Hls.isSupported()) {

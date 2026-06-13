@@ -246,6 +246,42 @@ router.get('/:id/playback', streamAuth, async (req, res) => {
   }
 });
 
+router.post('/:id/playback-error', streamAuth, async (req, res) => {
+  try {
+    const movie = await getStreamMovie(req.params.id);
+    const body = { ...(req.body || {}) };
+    if (body.src) {
+      body.src = logger.redactUrl(body.src);
+    }
+    if (body.playbackInfo) {
+      body.playbackInfo = { ...body.playbackInfo };
+      if (body.playbackInfo.directUrl) {
+        body.playbackInfo.directUrl = logger.redactUrl(body.playbackInfo.directUrl);
+      }
+      if (body.playbackInfo.hlsUrl) {
+        body.playbackInfo.hlsUrl = logger.redactUrl(body.playbackInfo.hlsUrl);
+      }
+    }
+    logger.warn('stream.client_playback_error', {
+      requestId: req.requestId,
+      movieId: movie.id,
+      title: movie.title,
+      userId: req.user && (req.user.userId || req.user.id),
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+      body
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    logger.error('stream.client_playback_error_log_failed', {
+      requestId: req.requestId,
+      movieId: req.params.id,
+      error
+    });
+    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to log playback error' });
+  }
+});
+
 // Serve prepared browser-compatible MP4 files with range support.
 router.get('/:id/prepared/:variant', streamAuth, async (req, res) => {
   try {

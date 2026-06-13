@@ -138,11 +138,11 @@ During each scan MyFlix uses `ffprobe` to skip short clips when they are below `
 
 Browsers, TVs, and mobile devices do not agree on local-library formats such as MKV, HEVC/x265, EAC3, AVI, WMV, or even some MP4 variants. MyFlix standardizes the library into seekable MP4 files that work broadly across devices:
 
-- Background conversion targets MP4 with H.264 Constrained Baseline video, AAC stereo audio, `yuv420p`, no B-frames, no embedded data/subtitle/chapter tracks, and fast-start metadata.
+- Background conversion targets MP4 with bitrate-capped H.264 Constrained Baseline video, AAC stereo audio, `yuv420p`, no B-frames, no embedded data/subtitle/chapter tracks, fast-start metadata, and max-1080p output for remote/mobile reliability.
 - Mobile-safe conversion uses CPU `libx264` encoding for stricter browser compatibility; GPU/NVENC is no longer used for the final mobile-safe library target.
 - The selected audio track prefers Hindi, then English, then the source default.
 - Playback uses a direct MP4 stream with HTTP range support when the converted file exists.
-- Mobile playback waits for a seekable MP4 instead of relying on live fallback transcoding.
+- Mobile and LAN clients wait for a seekable mobile-safe MP4 instead of relying on live fallback transcoding or very large direct-play files.
 - If original deletion is enabled, the prepared MP4 is promoted into the movie folder and becomes the tracked library file.
 - Files with multiple audio tracks expose an audio selector in the player; choosing another track prepares a matching MP4 variant when available.
 - Embedded text subtitles are exposed in the subtitle selector and converted to cached WebVTT when selected.
