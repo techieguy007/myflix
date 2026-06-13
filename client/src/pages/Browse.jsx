@@ -290,6 +290,22 @@ function flattenSeries(series) {
   ));
 }
 
+function flattenShowEpisodes(show) {
+  return (show?.seasons || [])
+    .flatMap((season) => (
+      (season.episodes || []).map((episode) => ({
+        ...episode,
+        series_title: episode.series_title || show.title,
+        rated: episode.rated || show.rated
+      }))
+    ))
+    .sort((a, b) => (
+      (Number(a.season_number || 0) - Number(b.season_number || 0))
+      || (Number(a.episode_number || 0) - Number(b.episode_number || 0))
+      || String(a.title || '').localeCompare(String(b.title || ''))
+    ));
+}
+
 function bestDescription(item) {
   return item?.plot || item?.description || 'Ready to stream from your local MyFlix library.';
 }
@@ -317,6 +333,86 @@ function ratingValue(item) {
 function yearValue(item) {
   const year = Number(item.release_year);
   return Number.isFinite(year) ? year : 0;
+}
+
+function uniqueGenres(episodes) {
+  const seen = new Set();
+  const genres = [];
+  episodes.forEach((episode) => {
+    String(episode.genre || '')
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .forEach((genre) => {
+        const key = genre.toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          genres.push(genre);
+        }
+      });
+  });
+  return genres.slice(0, 3).join(', ');
+}
+
+function yearLabel(episodes) {
+  const years = episodes
+    .map((episode) => Number(episode.release_year))
+    .filter((year) => Number.isFinite(year) && year > 0);
+  if (!years.length) return null;
+  const minYear = Math.min(...years);
+  const maxYear = Math.max(...years);
+  return minYear === maxYear ? String(minYear) : `${minYear}-${maxYear}`;
+}
+
+function bestRatedEpisode(episodes) {
+  return episodes.reduce((best, episode) => (
+    ratingValue(episode) > ratingValue(best) ? episode : best
+  ), episodes[0]);
+}
+
+function buildSeriesCards(series) {
+  return (series || [])
+    .map((show) => {
+      const episodes = flattenShowEpisodes(show);
+      if (!episodes.length) return null;
+
+      const firstEpisode = episodes[0];
+      const imageEpisode = episodes.find((episode) => mediaImage(episode)) || firstEpisode;
+      const ratedEpisode = bestRatedEpisode(episodes) || firstEpisode;
+      const seasonsCount = (show.seasons || []).length;
+      const episodeCount = show.episodeCount || episodes.length;
+
+      return {
+        ...firstEpisode,
+        id: firstEpisode.id,
+        card_key: `series:${show.title}`,
+        media_type: 'series',
+        title: show.title,
+        series_title: show.title,
+        episode_ids: episodes.map((episode) => Number(episode.id)).filter(Number.isFinite),
+        first_episode_id: firstEpisode.id,
+        episodeCount,
+        seasonsCount,
+        runtime: `${episodeCount} episode${episodeCount === 1 ? '' : 's'}`,
+        year_label: yearLabel(episodes),
+        genre: uniqueGenres(episodes) || firstEpisode.genre,
+        poster_url: imageEpisode.poster_url || firstEpisode.poster_url,
+        thumbnail: imageEpisode.thumbnail || firstEpisode.thumbnail,
+        imdb_rating: ratedEpisode.imdb_rating || firstEpisode.imdb_rating,
+        rating: ratedEpisode.rating || firstEpisode.rating,
+        rated: show.rated || firstEpisode.rated,
+        plot: ratedEpisode.plot || firstEpisode.plot,
+        description: ratedEpisode.description || firstEpisode.description,
+        duration: null
+      };
+    })
+    .filter(Boolean);
+}
+
+function favoriteTargetIds(item) {
+  const episodeIds = Array.isArray(item.episode_ids) ? item.episode_ids : [];
+  const ids = episodeIds.length ? episodeIds : [item.id];
+  return ids.map((id) => Number(id)).filter(Number.isFinite);
 }
 
 const curatedShelfDefinitions = [
@@ -413,6 +509,8 @@ function buildCuratedShelves(items) {
 function LibraryShelf({ title, meta, items, favoriteIds, onOpen, onFavorite, compact = false, episode = false }) {
   if (!items.length) return null;
 
+  const isFavoriteItem = (item) => favoriteTargetIds(item).some((id) => favoriteIds.has(id));
+
   return (
     <Shelf>
       <ShelfHeader>
@@ -422,13 +520,13 @@ function LibraryShelf({ title, meta, items, favoriteIds, onOpen, onFavorite, com
       <Row>
         {items.map((item, index) => (
           <MediaCard
-            key={`${title}-${item.id}`}
+            key={`${title}-${item.card_key || item.id}`}
             item={item}
             episode={episode || item.media_type === 'episode'}
             compact={compact}
             index={index}
             progress={itemProgress(item)}
-            isFavorite={favoriteIds.has(Number(item.id))}
+            isFavorite={isFavoriteItem(item)}
             onOpen={onOpen}
             onFavorite={onFavorite}
           />
@@ -454,16 +552,20 @@ const Browse = () => {
   const [error, setError] = useState(null);
 
   const episodes = useMemo(() => flattenSeries(series), [series]);
-  const allItems = useMemo(() => [...continueWatching, ...movies, ...episodes]
-    .filter((item, index, list) => list.findIndex((candidate) => Number(candidate.id) === Number(item.id)) === index), [continueWatching, episodes, movies]);
-  const favoriteItems = useMemo(() => allItems.filter((item) => favoriteIds.has(Number(item.id))), [allItems, favoriteIds]);
-  const curatedShelves = useMemo(() => buildCuratedShelves(allItems), [allItems]);
+  const seriesCards = useMemo(() => buildSeriesCards(series), [series]);
+  const playableItems = useMemo(() => [...movies, ...episodes]
+    .filter((item, index, list) => list.findIndex((candidate) => Number(candidate.id) === Number(item.id)) === index), [episodes, movies]);
+  const shelfItems = useMemo(() => [...movies, ...seriesCards], [movies, seriesCards]);
+  const favoriteItems = useMemo(() => (
+    shelfItems.filter((item) => favoriteTargetIds(item).some((id) => favoriteIds.has(id)))
+  ), [favoriteIds, shelfItems]);
+  const curatedShelves = useMemo(() => buildCuratedShelves(shelfItems), [shelfItems]);
   const heroItem = useMemo(() => (
     continueWatching.find((item) => mediaImage(item))
     || movies.find((item) => mediaImage(item) && (item.plot || item.description))
-    || episodes.find((item) => mediaImage(item))
-    || allItems[0]
-  ), [allItems, continueWatching, episodes, movies]);
+    || seriesCards.find((item) => mediaImage(item))
+    || shelfItems[0]
+  ), [continueWatching, movies, seriesCards, shelfItems]);
 
   const fetchLibrary = async ({ quiet = false } = {}) => {
     try {
@@ -555,36 +657,38 @@ const Browse = () => {
     }
   };
 
-  const openItem = (item) => navigate(`/watch/${item.id}?autoplay=1`);
+  const openItem = (item) => navigate(`/watch/${item.first_episode_id || item.id}?autoplay=1`);
 
   const playRandom = () => {
-    if (!allItems.length) return;
-    openItem(allItems[Math.floor(Math.random() * allItems.length)]);
+    if (!shelfItems.length) return;
+    openItem(shelfItems[Math.floor(Math.random() * shelfItems.length)]);
   };
 
   const toggleFavorite = async (item) => {
-    const itemId = Number(item.id);
-    const wasFavorite = favoriteIds.has(itemId);
+    const targetIds = favoriteTargetIds(item);
+    const primaryId = Number(item.id);
+    const wasFavorite = targetIds.some((id) => favoriteIds.has(id));
+    const previousFavoriteIds = new Set(favoriteIds);
+
     setFavoriteIds((current) => {
       const next = new Set(current);
-      if (wasFavorite) next.delete(itemId);
-      else next.add(itemId);
+      if (wasFavorite) {
+        targetIds.forEach((id) => next.delete(id));
+      } else if (Number.isFinite(primaryId)) {
+        next.add(primaryId);
+      }
       return next;
     });
 
     try {
       if (wasFavorite) {
-        await api.delete(`/api/movies/${item.id}/favorite`);
-      } else {
-        await api.post(`/api/movies/${item.id}/favorite`);
+        const idsToRemove = targetIds.filter((id) => previousFavoriteIds.has(id));
+        await Promise.all(idsToRemove.map((id) => api.delete(`/api/movies/${id}/favorite`)));
+      } else if (Number.isFinite(primaryId)) {
+        await api.post(`/api/movies/${primaryId}/favorite`);
       }
     } catch (err) {
-      setFavoriteIds((current) => {
-        const next = new Set(current);
-        if (wasFavorite) next.add(itemId);
-        else next.delete(itemId);
-        return next;
-      });
+      setFavoriteIds(previousFavoriteIds);
     }
   };
 
@@ -605,7 +709,7 @@ const Browse = () => {
   const isScanning = manualScanRunning || scanState?.running;
   const visibleScanResult = scanResult || scanState?.lastResult;
   const hiddenPendingCount = counts.hidden || 0;
-  const hasLibrary = allItems.length > 0;
+  const hasLibrary = shelfItems.length > 0;
   const heroTitle = heroItem ? displayTitle(heroItem, heroItem.media_type === 'episode') : 'MyFlix';
 
   return (
@@ -616,10 +720,10 @@ const Browse = () => {
           <HeroTitle>{heroTitle}</HeroTitle>
           <MetaLine>
             {heroItem?.rated && <RatingBadge>{heroItem.rated}</RatingBadge>}
-            {heroItem?.release_year && <span>{heroItem.release_year}</span>}
+            {(heroItem?.year_label || heroItem?.release_year) && <span>{heroItem.year_label || heroItem.release_year}</span>}
             {heroItem?.runtime && <span>{heroItem.runtime}</span>}
             {heroItem?.imdb_rating && <span>IMDb {heroItem.imdb_rating}</span>}
-            <span>{counts.total || allItems.length} ready to watch</span>
+            <span>{counts.total || playableItems.length} ready to watch</span>
           </MetaLine>
           <HeroDescription>{heroItem ? bestDescription(heroItem) : 'Your playable movies and shows will appear here as conversion finishes.'}</HeroDescription>
           <ButtonRow>
@@ -715,7 +819,7 @@ const Browse = () => {
             <LibraryShelf
               title="Recently Ready"
               meta="Playable now"
-              items={allItems.slice(0, 24)}
+              items={shelfItems.slice(0, 24)}
               favoriteIds={favoriteIds}
               onOpen={openItem}
               onFavorite={toggleFavorite}

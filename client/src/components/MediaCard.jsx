@@ -151,13 +151,15 @@ const ProgressFill = styled.div`
 export function episodeLabel(item) {
   const season = String(item.season_number || 1).padStart(2, '0');
   const episode = String(item.episode_number || 1).padStart(2, '0');
-  return `S${season}E${episode} ${item.episode_title || item.title}`;
+  const code = `S${season}E${episode}`;
+  const episodeTitle = item.episode_title || item.title;
+  const showTitle = item.series_title || '';
+  return [showTitle, code, episodeTitle].filter(Boolean).join(' - ');
 }
 
 export function displayTitle(item, episode = false) {
-  return episode || item.media_type === 'episode'
-    ? episodeLabel(item)
-    : item.title;
+  if (item.media_type === 'series') return item.series_title || item.title;
+  return episode || item.media_type === 'episode' ? episodeLabel(item) : item.title;
 }
 
 export function mediaImage(item) {
@@ -166,7 +168,7 @@ export function mediaImage(item) {
 
 export function mediaMetaParts(item) {
   return [
-    item.release_year,
+    item.year_label || item.release_year,
     item.runtime,
     item.genre && String(item.genre).split(',')[0].trim()
   ].filter(Boolean);
