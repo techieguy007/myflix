@@ -28,10 +28,18 @@ const Container = styled.div`
   min-height: 100vh;
   background: ${({ theme }) => theme.colors.background};
   padding: 2rem;
+
+  @media (max-width: 760px) {
+    padding: 1rem;
+  }
 `;
 
 const Header = styled.div`
   margin-bottom: 3rem;
+
+  @media (max-width: 760px) {
+    margin-bottom: 1.5rem;
+  }
 `;
 
 const Title = styled.h1`
@@ -47,24 +55,37 @@ const Subtitle = styled.p`
 
 const TabContainer = styled.div`
   display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
   margin-bottom: 2rem;
   border-bottom: 1px solid #333;
+  padding-bottom: 0.75rem;
 `;
 
 const Tab = styled.button.withConfig({
   shouldForwardProp: (prop) => prop !== 'active'
 })`
   background: none;
-  border: none;
-  padding: 1rem 2rem;
+  border: 1px solid ${({ active, theme }) => active ? theme.colors.primary : '#333'};
+  border-radius: 6px;
+  padding: 0.8rem 1rem;
   color: ${({ active, theme }) => active ? theme.colors.primary : theme.colors.text};
-  border-bottom: ${({ active, theme }) => active ? `2px solid ${theme.colors.primary}` : '2px solid transparent'};
+  background: ${({ active }) => active ? 'rgba(229, 9, 20, 0.12)' : '#1a1a1a'};
   cursor: pointer;
   transition: all 0.3s ease;
-  font-size: 1rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  white-space: nowrap;
+  min-height: 2.75rem;
 
   &:hover {
     color: ${({ theme }) => theme.colors.primary};
+    border-color: ${({ theme }) => theme.colors.primary};
+  }
+
+  @media (max-width: 760px) {
+    flex: 1 1 calc(50% - 0.6rem);
+    padding: 0.72rem 0.8rem;
   }
 `;
 
@@ -72,6 +93,10 @@ const Content = styled.div`
   background: #1a1a1a;
   border-radius: 8px;
   padding: 2rem;
+
+  @media (max-width: 760px) {
+    padding: 1rem;
+  }
 `;
 
 const UploadSection = styled.div`
